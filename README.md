@@ -1,4 +1,4 @@
-# xenia-2025: Co.Hack 2026 prep kit
+# xenia-2026: Co.Hack 2026 prep kit
 
 Project-agnostic hackathon kit: an isolated AWS member account, `26.cohack.tetl.ca` with a wildcard
 certificate, GitHub OIDC deploys, per-PR preview environments, a team GPU box serving an open-weight
