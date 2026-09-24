@@ -1,12 +1,7 @@
 # Temporary: proves the deploy-role trust string. Deleted in Task 9.
-# The push trigger on build/foundation is temporary too: gh workflow run can't dispatch a
-# workflow that only exists on a branch, so this lets the controller trigger a run before the
-# foundation PR merges. Remove the push trigger (keep workflow_dispatch) before merging to main.
 name: oidc-probe
 on:
   workflow_dispatch:
-  push:
-    branches: [build/foundation]
 permissions: {}
 jobs:
   probe:
