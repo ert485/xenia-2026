@@ -1,0 +1,20 @@
+schemaVersion: "2.2"
+description: "xenia: manage the kit checkout and the gateway compose project on the Docker box"
+parameters:
+  Action:
+    type: String
+    description: "update | restart | status | logs | app-down | current"
+    allowedValues:
+      - update
+      - restart
+      - status
+      - logs
+      - app-down
+      - current
+mainSteps:
+  - action: aws:runShellScript
+    name: gateway
+    inputs:
+      timeoutSeconds: "900"
+      runCommand:
+        - /srv/kit/infra/recipes/docker-box/box/gateway.sh {{ Action }}
