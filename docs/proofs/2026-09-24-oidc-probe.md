@@ -1,7 +1,6 @@
 # Proof: OIDC deploy-role trust string
 
-**NOT YET RUN.** This is a template: the controller fills in the run URLs and masked output after
-each real dispatch, then removes this marker line.
+**Run 1 done (2026-09-24); run 2 pending the foundation PR merge.**
 
 ## What this proves
 
@@ -38,10 +37,14 @@ gh workflow run oidc-probe.yml --ref main
 
 ## Run 1: triggered by a push to `build/foundation`, after Step 6 (expected to fail the assume step)
 
-- Run URL: _not yet run_
-- Printed `sub`: expected exactly
+- Run URL: https://github.com/ert485/xenia-2026/actions/runs/36064476965 (2026-09-24 21:55 UTC, after
+  the trust was re-applied with the immutable prefix)
+- Printed `sub`, exactly as expected:
   `repo:ert485@6201488/xenia-2026@1384206368:ref:refs/heads/build/foundation:job_workflow_ref:ert485/xenia-2026/.github/workflows/oidc-probe.yml@refs/heads/build/foundation`
-- Assume step: expected to fail with `Not authorized to perform sts:AssumeRoleWithWebIdentity`
+- Assume step: failed with `Not authorized to perform sts:AssumeRoleWithWebIdentity`, as expected
+  for a branch.
+- The earlier run https://github.com/ert485/xenia-2026/actions/runs/36063810269 is the one that
+  printed the immutable form and showed the original name-based trust could never match.
 
 If the printed `sub` format differs (for example, no `job_workflow_ref` segment, or a different
 repo segment), the `values` expression in `data.aws_iam_policy_document.deploy_trust`
@@ -56,6 +59,5 @@ to match the real format, followed by a re-apply.
 
 ## Cleanup
 
-The `push: branches: [build/foundation]` trigger on `oidc-probe.yml` is temporary and must be
-removed before merging to `main` (kept as `workflow_dispatch` only). The whole workflow file is
-deleted in Task 9.
+The temporary `push: branches: [build/foundation]` trigger was removed before merge
+(`workflow_dispatch` only). The whole workflow file is deleted in Task 9.
