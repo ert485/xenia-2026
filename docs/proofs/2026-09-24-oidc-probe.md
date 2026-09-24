@@ -12,17 +12,21 @@ denied, a run from `main` succeeds.
 
 ## Command
 
-```bash
-gh workflow run oidc-probe.yml --ref build/foundation
-```
+`oidc-probe.yml` exists only on `build/foundation` so far, and `gh workflow run` cannot dispatch a
+workflow that only exists on a branch (pre-flight ruling 4.1) — that's why the workflow carries a
+temporary `push: branches: [build/foundation]` trigger. Run 1 therefore fires automatically on the
+next push to `build/foundation`; it must happen **after** Step 6 has set the
+`AWS_DEPLOY_ROLE_ARN` repo secret (`role-to-assume` is empty/invalid otherwise). No `gh workflow
+run` is needed for it.
 
-Then, after the foundation PR has merged to `main`:
+Run 2, after the foundation PR has merged to `main` (the workflow file now exists on the default
+branch, so `workflow_dispatch` can target it):
 
 ```bash
 gh workflow run oidc-probe.yml --ref main
 ```
 
-## Run 1: from `build/foundation` (expected to fail the assume step)
+## Run 1: triggered by a push to `build/foundation`, after Step 6 (expected to fail the assume step)
 
 - Run URL: _not yet run_
 - Printed `sub`: expected exactly

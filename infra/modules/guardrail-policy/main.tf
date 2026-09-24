@@ -21,8 +21,14 @@ data "aws_iam_policy_document" "deny" {
   statement {
     sid       = "DenyKitBucketMutation"
     effect    = "Deny"
-    actions   = ["s3:DeleteBucket", "s3:PutBucketPolicy", "s3:DeleteBucketPolicy", "s3:PutBucketVersioning", "s3:PutLifecycleConfiguration", "s3:PutBucketPublicAccessBlock", "s3:PutBucketOwnershipControls", "s3:DeleteObjectVersion"]
+    actions   = ["s3:DeleteBucket", "s3:PutBucketPolicy", "s3:DeleteBucketPolicy", "s3:PutBucketVersioning", "s3:PutLifecycleConfiguration", "s3:PutBucketPublicAccessBlock", "s3:PutBucketOwnershipControls", "s3:DeleteObjectVersion", "s3:PutBucketAcl", "s3:PutEncryptionConfiguration"]
     resources = ["arn:aws:s3:::xenia-tfstate-*", "arn:aws:s3:::xenia-backups-*"]
+  }
+  statement {
+    sid       = "DenyKitLockTableMutation"
+    effect    = "Deny"
+    actions   = ["dynamodb:DeleteTable", "dynamodb:UpdateTable"]
+    resources = ["arn:aws:dynamodb:*:${var.account_id}:table/xenia-tflock"]
   }
   statement {
     sid     = "DenyKitIamMutation"
@@ -39,7 +45,7 @@ data "aws_iam_policy_document" "deny" {
   statement {
     sid       = "DenyZoneAndCertDeletion"
     effect    = "Deny"
-    actions   = ["route53:DeleteHostedZone", "route53:UpdateHostedZoneComment", "route53:ChangeTagsForResource", "acm:DeleteCertificate", "acm:RemoveTagsFromCertificate"]
+    actions   = ["route53:DeleteHostedZone", "route53:UpdateHostedZoneComment", "route53:ChangeTagsForResource", "acm:DeleteCertificate", "acm:RemoveTagsFromCertificate", "acm:UpdateCertificateOptions"]
     resources = ["arn:aws:route53:::hostedzone/${var.zone_id}", "arn:aws:acm:us-east-1:${var.account_id}:certificate/*"]
   }
   statement {
@@ -56,8 +62,28 @@ data "aws_iam_policy_document" "deny" {
   statement {
     sid       = "DenyGatewayAndGpuSecrets"
     effect    = "Deny"
-    actions   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory", "ssm:GetParametersByPath", "ssm:PutParameter", "ssm:DeleteParameter"]
+    actions   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory", "ssm:PutParameter", "ssm:DeleteParameter"]
     resources = ["arn:aws:ssm:*:${var.account_id}:parameter/xenia/gateway/*", "arn:aws:ssm:*:${var.account_id}:parameter/xenia/gpu/*"]
+  }
+  # ssm:GetParametersByPath is authorized against the requested *path* ARN, not the child
+  # parameters it returns, so denying it only on /xenia/gateway/* and /xenia/gpu/* is bypassable:
+  # a recursive GetParametersByPath on "/", "/xenia", or "/xenia/" is a different resource ARN and
+  # would still return the gateway/GPU secrets as children. Deny GetParametersByPath on those
+  # parent path ARNs too so recursion can never reach past them; /xenia/app/* stays readable by
+  # path for the deploy role (charter C10).
+  statement {
+    sid    = "DenyParameterPathTraversal"
+    effect = "Deny"
+    actions = [
+      "ssm:GetParametersByPath",
+    ]
+    resources = [
+      "arn:aws:ssm:*:${var.account_id}:parameter/",
+      "arn:aws:ssm:*:${var.account_id}:parameter/xenia",
+      "arn:aws:ssm:*:${var.account_id}:parameter/xenia/",
+      "arn:aws:ssm:*:${var.account_id}:parameter/xenia/gateway/*",
+      "arn:aws:ssm:*:${var.account_id}:parameter/xenia/gpu/*",
+    ]
   }
   statement {
     sid         = "DenyOtherRegions"
