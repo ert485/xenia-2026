@@ -40,3 +40,17 @@ setup() {
   [[ "$output" == *"key=FAKEKEY-configure export-credentials --profile personal-admin --format env"* ]]
   [[ "$output" != *"FAKESECRET"* ]]
 }
+
+@test "tf.sh requests the cohack profile for a non-org stack" {
+  FAKE_ACCOUNT="$MEMBER_ID" run scripts/tf.sh platform plan
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"key=FAKEKEY-configure export-credentials --profile cohack --format env"* ]]
+}
+
+@test "tf.sh dies if credential export fails, and never invokes terraform" {
+  FAKE_ACCOUNT="$MEMBER_ID" FAKE_EXPORT_CREDS_FAIL=1 run scripts/tf.sh platform plan
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not export credentials for profile cohack"* ]]
+  [[ "$output" != *"cwd="* ]]
+  [[ "$output" != *"args="* ]]
+}
