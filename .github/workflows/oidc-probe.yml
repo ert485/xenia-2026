@@ -1,0 +1,32 @@
+# Temporary: proves the deploy-role trust string. Deleted in Task 9.
+# The push trigger on build/foundation is temporary too: gh workflow run can't dispatch a
+# workflow that only exists on a branch, so this lets the controller trigger a run before the
+# foundation PR merges. Remove the push trigger (keep workflow_dispatch) before merging to main.
+name: oidc-probe
+on:
+  workflow_dispatch:
+  push:
+    branches: [build/foundation]
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: print the token's sub claim
+        run: |
+          tok=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r .value)
+          python3 - "$tok" <<'PY'
+          import sys, base64, json
+          p = sys.argv[1].split('.')[1]; p += '=' * (-len(p) % 4)
+          print("sub =", json.loads(base64.urlsafe_b64decode(p))["sub"])
+          PY
+      - uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ca-central-1
+      - name: who am I (masked)
+        run: aws sts get-caller-identity --query Arn --output text | sed -E 's/[0-9]{12}/<account-id>/'
