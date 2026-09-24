@@ -4,6 +4,16 @@
 *.local.env
 .env
 .terraform/
+.terraform-validate/
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
+
+# local-only files created by the kit scripts
+*.local.hcl
+.venv/
+site/build/
+site/dist/
+*.pem
+node_modules/
+docs/proofs/*.raw

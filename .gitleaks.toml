@@ -1,0 +1,15 @@
+title = "xenia kit"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "litellm-virtual-key"
+description = "LiteLLM virtual or master key (sk-...)"
+regex = '''sk-[A-Za-z0-9_-]{20,}'''
+keywords = ["sk-"]
+
+[allowlist]
+description = "documentation placeholders and test fixtures"
+regexes = ['''sk-x{20,}''', '''sk-<[a-z-]+>''']
+paths = ['''^tests/fixtures/''']

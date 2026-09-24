@@ -1,0 +1,32 @@
+# check: the first of the two blocking gates (P-two-gates). Runs make check, identical to local.
+name: check
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions: {}
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks (default rules plus the LiteLLM sk- rule)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_SUMMARY: "false"
+          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: make check
+        run: make check
