@@ -1,0 +1,9 @@
+# Environment values never get committed: account IDs, zone IDs, keys.
+*.tfvars
+!*.example.tfvars
+*.local.env
+.env
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
