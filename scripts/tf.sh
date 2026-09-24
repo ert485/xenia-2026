@@ -26,19 +26,26 @@ if [[ -f "$backend" ]]; then
 fi
 
 case "$stack" in
-  org) require_profile personal-admin "$MANAGEMENT_ACCOUNT_ID"; tf_profile=personal-admin ;;
-  *)   require_profile cohack "$MEMBER_ACCOUNT_ID"; tf_profile=cohack ;;
+  org)
+    require_profile personal-admin "$MANAGEMENT_ACCOUNT_ID"
+    require_profile cohack "$MEMBER_ACCOUNT_ID"
+    ;;
+  *) require_profile cohack "$MEMBER_ACCOUNT_ID" ;;
 esac
 
-# Terraform 1.5.7's S3 backend uses the old AWS SDK, which can't read sso-session-style profiles
-# (only the aws provider, v6, handles those); export short-lived credentials instead so the
-# backend can authenticate. Never echoed: creds is only ever eval'd, not printed. Captured into a
-# variable first (not `eval "$(...)"` directly) because under set -e, eval of a failed command
-# substitution still returns 0 — that would fail open and run terraform with ambient credentials
-# on an expired SSO session.
-creds="$(aws configure export-credentials --profile "$tf_profile" --format env)" \
-  || die "could not export credentials for profile $tf_profile (run: aws sso login --sso-session personal)"
-[[ -n "$creds" ]] || die "could not export credentials for profile $tf_profile (run: aws sso login --sso-session personal)"
+# The S3 backend always authenticates as cohack, regardless of stack: state and the lock table
+# live in the member account, and Terraform 1.5.7's S3 backend uses the old AWS SDK, which can't
+# read sso-session-style profiles (only the aws provider, v6, handles those) — so we export
+# cohack's short-lived credentials into the environment for every stack. Each stack's own provider
+# block still authenticates as whichever account it targets, because it sets `profile` explicitly,
+# and in aws provider v6 an explicitly configured `profile` takes precedence over environment
+# credentials. Never echoed: creds is only ever eval'd, not printed. Captured into a variable first
+# (not `eval "$(...)"` directly) because under set -e, eval of a failed command substitution still
+# returns 0 — that would fail open and run terraform with ambient credentials on an expired SSO
+# session.
+creds="$(aws configure export-credentials --profile cohack --format env)" \
+  || die "could not export credentials for profile cohack (run: aws sso login --sso-session personal)"
+[[ -n "$creds" ]] || die "could not export credentials for profile cohack (run: aws sso login --sso-session personal)"
 eval "$creds"
 
 cmd="${1:-}"

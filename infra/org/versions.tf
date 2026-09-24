@@ -10,6 +10,10 @@ terraform {
 }
 
 # Resources live in the management account; state lives in the member account's bucket (backend profile cohack).
+# The explicit profile here is load-bearing: scripts/tf.sh exports cohack (member account)
+# credentials into the environment for the S3 backend, and in aws provider v6 an explicitly
+# configured profile overrides those environment credentials, so this provider still runs as
+# the management account.
 provider "aws" {
   region  = "ca-central-1"
   profile = "personal-admin"

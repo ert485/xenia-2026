@@ -34,11 +34,23 @@ setup() {
   [[ "$output" == *"different account"* ]]
 }
 
-@test "tf.sh exports short-lived credentials for the stack's profile and never echoes the secret" {
-  FAKE_ACCOUNT="$MANAGEMENT_ID" run scripts/tf.sh org plan
+@test "tf.sh exports cohack credentials for org (backend is member-account) and never echoes the secret" {
+  # org's own guard checks personal-admin against MANAGEMENT_ACCOUNT_ID, and now also checks
+  # cohack against MEMBER_ACCOUNT_ID; the fake aws shim answers get-caller-identity the same way
+  # regardless of --profile, so give both accounts the same fake value to satisfy both guards.
+  printf 'MEMBER_ACCOUNT_ID=%s\nMANAGEMENT_ACCOUNT_ID=%s\nZONE_ID=ZFAKEZONE\n' "$MANAGEMENT_ID" "$MANAGEMENT_ID" > "$TMP/kit-org-ok.env"
+  KIT_ENV_FILE="$TMP/kit-org-ok.env" FAKE_ACCOUNT="$MANAGEMENT_ID" run scripts/tf.sh org plan
   [ "$status" -eq 0 ]
-  [[ "$output" == *"key=FAKEKEY-configure export-credentials --profile personal-admin --format env"* ]]
+  [[ "$output" == *"key=FAKEKEY-configure export-credentials --profile cohack --format env"* ]]
   [[ "$output" != *"FAKESECRET"* ]]
+}
+
+@test "tf.sh refuses org when the cohack identity doesn't match the member account" {
+  # personal-admin matches MANAGEMENT_ACCOUNT_ID, but the fake identity is the same for every
+  # profile, so the added cohack-vs-MEMBER_ACCOUNT_ID guard now catches the mismatch.
+  FAKE_ACCOUNT="$MANAGEMENT_ID" run scripts/tf.sh org plan
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"different account"* ]]
 }
 
 @test "tf.sh requests the cohack profile for a non-org stack" {
