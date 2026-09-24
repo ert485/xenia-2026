@@ -27,6 +27,8 @@ setup() {
   run scripts/bootstrap.sh
   [ "$status" -eq 0 ]
   [ "$(grep bucket "$KIT_BACKEND_FILE")" = "$first" ]
-  ! grep -q 'create-bucket' "$AWS_CALLS"
-  ! grep -q 'create-table' "$AWS_CALLS"
+  run grep -q 'create-bucket' "$AWS_CALLS"
+  [ "$status" -ne 0 ]
+  run grep -q 'create-table' "$AWS_CALLS"
+  [ "$status" -ne 0 ]
 }
