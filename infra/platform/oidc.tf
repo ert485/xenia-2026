@@ -12,10 +12,20 @@ module "guardrail" {
 
 locals {
   repo_slug = { for r, _ in var.allowed_repos : r => replace(r, "/", "-") }
+  # "" when missing, so the role preconditions below report it instead of an index error.
+  sub_prefix = { for r, _ in var.allowed_repos : r => lookup(var.oidc_sub_prefixes, r, "") }
+  # A prefix must name its own repo: repo:OWNER@<id>/REPO@<id>.
+  sub_prefix_ok = {
+    for r, _ in var.allowed_repos : r => (
+      startswith(local.sub_prefix[r], "repo:${split("/", r)[0]}@") &&
+      strcontains(local.sub_prefix[r], "/${split("/", r)[1]}@")
+    )
+  }
 }
 
 # deploy: trusted only from main AND only from the named workflow files (D31, D35). Requires the
-# repo's OIDC sub customization: include_claim_keys = [repo, context, job_workflow_ref].
+# repo's OIDC sub customization: include_claim_keys = [repo, context, job_workflow_ref]. The repo
+# segment uses GitHub's immutable form (var.oidc_sub_prefixes); job_workflow_ref keeps plain names.
 data "aws_iam_policy_document" "deploy_trust" {
   for_each = var.allowed_repos
   statement {
@@ -32,7 +42,7 @@ data "aws_iam_policy_document" "deploy_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = [for wf in each.value : "repo:${each.key}:ref:refs/heads/main:job_workflow_ref:${each.key}/.github/workflows/${wf}@refs/heads/main"]
+      values   = [for wf in each.value : "${local.sub_prefix[each.key]}:ref:refs/heads/main:job_workflow_ref:${each.key}/.github/workflows/${wf}@refs/heads/main"]
     }
   }
 }
@@ -42,6 +52,12 @@ resource "aws_iam_role" "deploy" {
   name                 = "xenia-deploy-${local.repo_slug[each.key]}"
   assume_role_policy   = data.aws_iam_policy_document.deploy_trust[each.key].json
   max_session_duration = 3600
+  lifecycle {
+    precondition {
+      condition     = local.sub_prefix_ok[each.key]
+      error_message = "oidc_sub_prefixes has no valid entry for this repo: it needs repo:OWNER@OWNER_ID/REPO@REPO_ID from gh api repos/OWNER/REPO/actions/oidc/customization/sub (.sub_claim_prefix), in infra/platform/oidc-sub-prefixes.auto.tfvars.json."
+    }
+  }
 }
 resource "aws_iam_role_policy_attachment" "deploy_admin" {
   for_each   = var.allowed_repos
@@ -72,7 +88,7 @@ data "aws_iam_policy_document" "preview_trust" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${each.key}:*"]
+      values   = ["${local.sub_prefix[each.key]}:*"]
     }
   }
 }
@@ -106,6 +122,12 @@ resource "aws_iam_role" "preview" {
   name                 = "xenia-preview-${local.repo_slug[each.key]}"
   assume_role_policy   = data.aws_iam_policy_document.preview_trust[each.key].json
   max_session_duration = 3600
+  lifecycle {
+    precondition {
+      condition     = local.sub_prefix_ok[each.key]
+      error_message = "oidc_sub_prefixes has no valid entry for this repo: it needs repo:OWNER@OWNER_ID/REPO@REPO_ID from gh api repos/OWNER/REPO/actions/oidc/customization/sub (.sub_claim_prefix), in infra/platform/oidc-sub-prefixes.auto.tfvars.json."
+    }
+  }
 }
 resource "aws_iam_role_policy" "preview" {
   for_each = var.allowed_repos
