@@ -1,6 +1,6 @@
 SHELL := /usr/bin/env bash
 STACKS := org platform recipes/docker-box recipes/gpu-box recipes/static-site recipes/dynamodb-table examples/kit-site
-SCRIPTS := $(shell find scripts shutdown.d plugin infra -type f -name '*.sh' 2>/dev/null)
+SCRIPTS := $(shell find scripts shutdown.d plugin infra templates .devcontainer -type f -name '*.sh' 2>/dev/null)
 WORKFLOWS := $(wildcard templates/workflows/*.yml) $(wildcard .github/workflows/*.yml)
 
 .PHONY: check tools fmt validate lint test workflows leak plugin-sync-check sync-plugin sync-workflows shutdown-md shutdown-md-check
@@ -15,7 +15,7 @@ tools: ## install the local toolchain (macOS)
 	.venv/bin/pip install -q 'mkdocs-material>=9.5,<10' segno
 
 fmt:
-	@test -d infra && terraform fmt -check -recursive infra || true
+	@if [ -d infra ]; then terraform fmt -check -recursive infra; fi
 
 validate:
 	@for s in $(STACKS); do \
@@ -25,15 +25,15 @@ validate:
 	done
 
 lint:
-	@[ -n "$(SCRIPTS)" ] && shellcheck -x $(SCRIPTS) || true
+	@if [ -n "$(SCRIPTS)" ]; then shellcheck -x $(SCRIPTS); fi
 	@for f in $(SCRIPTS); do bash -n "$$f" || exit 1; done
 
 test:
 	bats -r tests
 
 workflows:
-	@[ -n "$(strip $(WORKFLOWS))" ] && actionlint $(WORKFLOWS) || true
-	@[ -n "$(strip $(WORKFLOWS))" ] && zizmor --min-severity medium --persona regular $(WORKFLOWS) || true
+	@if [ -n "$(strip $(WORKFLOWS))" ]; then actionlint $(WORKFLOWS); fi
+	@if [ -n "$(strip $(WORKFLOWS))" ]; then zizmor --min-severity medium --persona regular $(WORKFLOWS); fi
 
 leak:
 	@if [ -x scripts/ci/leak-check.sh ]; then scripts/ci/leak-check.sh README.md docs team-kit runbook plugin templates site infra/examples; else echo "leak: scripts/ci/leak-check.sh not present yet (Task 2)"; fi
