@@ -67,10 +67,12 @@ data "aws_iam_policy_document" "deny" {
   }
   # ssm:GetParametersByPath is authorized against the requested *path* ARN, not the child
   # parameters it returns, so denying it only on /xenia/gateway/* and /xenia/gpu/* is bypassable:
-  # a recursive GetParametersByPath on "/", "/xenia", or "/xenia/" is a different resource ARN and
-  # would still return the gateway/GPU secrets as children. Deny GetParametersByPath on those
-  # parent path ARNs too so recursion can never reach past them; /xenia/app/* stays readable by
-  # path for the deploy role (charter C10).
+  # a recursive GetParametersByPath on "/", "/xenia", "/xenia/", or on the gateway/gpu path itself
+  # without a trailing slash (Path=/xenia/gateway resolves to parameter/xenia/gateway, which
+  # parameter/xenia/gateway/* does not match) is a different resource ARN and would still return
+  # the gateway/GPU secrets as children. Deny GetParametersByPath on all of those parent path ARNs
+  # (exact, no trailing-slash variant included) so recursion can never reach past them;
+  # /xenia/app/* stays readable by path for the deploy role (charter C10).
   statement {
     sid    = "DenyParameterPathTraversal"
     effect = "Deny"
@@ -81,7 +83,9 @@ data "aws_iam_policy_document" "deny" {
       "arn:aws:ssm:*:${var.account_id}:parameter/",
       "arn:aws:ssm:*:${var.account_id}:parameter/xenia",
       "arn:aws:ssm:*:${var.account_id}:parameter/xenia/",
+      "arn:aws:ssm:*:${var.account_id}:parameter/xenia/gateway",
       "arn:aws:ssm:*:${var.account_id}:parameter/xenia/gateway/*",
+      "arn:aws:ssm:*:${var.account_id}:parameter/xenia/gpu",
       "arn:aws:ssm:*:${var.account_id}:parameter/xenia/gpu/*",
     ]
   }

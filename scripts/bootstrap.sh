@@ -44,7 +44,6 @@ cat > "$backend" <<EOF
 bucket         = "$bucket"
 dynamodb_table = "$table"
 region         = "$region"
-profile        = "cohack"
 encrypt        = true
 EOF
 log "wrote $backend"

@@ -17,7 +17,8 @@ setup() {
   grep -q 's3api create-bucket' "$AWS_CALLS"
   grep -q 'dynamodb create-table' "$AWS_CALLS"
   grep -qE '^bucket += "xenia-tfstate-[0-9a-f]{6}"$' "$KIT_BACKEND_FILE"
-  grep -qE 'profile += "cohack"' "$KIT_BACKEND_FILE"
+  run grep -q 'profile' "$KIT_BACKEND_FILE"
+  [ "$status" -ne 0 ]
 }
 
 @test "second run reuses the bucket name and creates nothing" {

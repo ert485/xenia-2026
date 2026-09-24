@@ -26,9 +26,14 @@ if [[ -f "$backend" ]]; then
 fi
 
 case "$stack" in
-  org) require_profile personal-admin "$MANAGEMENT_ACCOUNT_ID" ;;
-  *)   require_profile cohack "$MEMBER_ACCOUNT_ID" ;;
+  org) require_profile personal-admin "$MANAGEMENT_ACCOUNT_ID"; tf_profile=personal-admin ;;
+  *)   require_profile cohack "$MEMBER_ACCOUNT_ID"; tf_profile=cohack ;;
 esac
+
+# Terraform 1.5.7's S3 backend uses the old AWS SDK, which can't read sso-session-style profiles
+# (only the aws provider, v6, handles those); export short-lived credentials instead so the
+# backend can authenticate. Never echoed: eval consumes the output directly.
+eval "$(aws configure export-credentials --profile "$tf_profile" --format env)"
 
 cmd="${1:-}"
 args=("$@")
