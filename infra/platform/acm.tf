@@ -8,13 +8,18 @@ resource "aws_acm_certificate" "apex" {
   }
 }
 
+locals {
+  apex_dvo = { for o in aws_acm_certificate.apex.domain_validation_options : o.domain_name => o }
+}
+
 resource "aws_route53_record" "apex_validation" {
-  for_each        = { for o in aws_acm_certificate.apex.domain_validation_options : o.domain_name => o }
+  # Keys come from config, not the certificate, so `terraform import` can evaluate for_each before the cert exists.
+  for_each        = toset([var.zone_name])
   zone_id         = aws_route53_zone.this.zone_id
-  name            = each.value.resource_record_name
-  type            = each.value.resource_record_type
+  name            = local.apex_dvo[each.key].resource_record_name
+  type            = local.apex_dvo[each.key].resource_record_type
   ttl             = 60
-  records         = [each.value.resource_record_value]
+  records         = [local.apex_dvo[each.key].resource_record_value]
   allow_overwrite = true
 }
 
