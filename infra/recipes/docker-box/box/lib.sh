@@ -29,6 +29,29 @@ ssm_get() {
     --query Parameter.Value --output text
 }
 
+# vllm_probe <api_base> <token> <placeholder>: prints the api_base the gateway should use. The
+# gpu-box stack writes /xenia/gpu/api-base once and never clears it, so it keeps naming the GPU
+# box's EIP even with no GPU instance running (EC2 capacity) or while the box is stopped — an
+# address that drops packets rather than refusing the connection, so an unprobed LiteLLM eats the
+# full vLLM timeout on every request before failing over to Bedrock. If <api_base> is already the
+# placeholder there is nothing to probe. Otherwise hit the vLLM health path (same one
+# infra/recipes/gpu-box/watchdog.sh polls) with a 3s timeout; on success print <api_base> unchanged,
+# on failure log why and print <placeholder> (which fails DNS instantly instead of hanging).
+vllm_probe() {
+  local api_base="$1" token="$2" placeholder="$3"
+  if [[ "$api_base" == "$placeholder" ]]; then
+    echo "$api_base"
+    return 0
+  fi
+  if curl -sk -m 3 -o /dev/null -H "Authorization: Bearer $token" "${api_base%/v1}/health"; then
+    log "vLLM backend: reachable ($api_base)"
+    echo "$api_base"
+  else
+    log "vLLM backend not reachable; using the instant-fail placeholder, requests go to Bedrock"
+    echo "$placeholder"
+  fi
+}
+
 # list_previews: running or stopped preview projects (pr-<n>), one per line, oldest first, ordered by
 # the creation time of the project's pr-<n>-web container.
 list_previews() {

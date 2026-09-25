@@ -60,6 +60,25 @@ run_on_box() {
   [[ "$st" == "Success" ]] || die "command on the GPU box ended with status $st"
 }
 
+# wait_for_vllm_health: polls https://localhost:8443/health on the GPU box itself, bounded at 20
+# minutes (first boot downloads weights; a warm reboot is healthy in well under a minute). Returns
+# non-zero on timeout instead of dying: the caller updates the gateway either way (start.sh's own
+# probe, Task 7-follow-up-a, is what actually decides real-api-base vs. placeholder).
+wait_for_vllm_health() {
+  local cid st i
+  # shellcheck disable=SC2016  # this is the remote command's source, not something to expand here
+  cid="$(aws_ ssm send-command --instance-ids "$id" --document-name AWS-RunShellScript \
+    --parameters '{"commands":["for i in $(seq 1 240); do curl -fsk -m 3 -o /dev/null https://localhost:8443/health && { echo healthy; exit 0; }; sleep 5; done; echo timeout; exit 1"]}' \
+    --query Command.CommandId --output text)"
+  for ((i = 0; i < 450; i++)); do
+    st="$(aws_ ssm get-command-invocation --command-id "$cid" --instance-id "$id" --query Status --output text 2>/dev/null || echo Pending)"
+    case "$st" in Pending|InProgress|Delayed) sleep 3 ;; *) break ;; esac
+  done
+  aws_ ssm get-command-invocation --command-id "$cid" --instance-id "$id" \
+    --query '[StandardOutputContent,StandardErrorContent]' --output text | mask
+  [[ "$st" == "Success" ]]
+}
+
 read -r id state itype <<< "$(instance)"
 [[ -n "${id:-}" && "$id" != "None" ]] || die "no GPU box found (tag xenia-role=gpu-box, profile $profile, $region)"
 
@@ -67,11 +86,19 @@ case "$action" in
   start)
     aws_ ec2 start-instances --instance-ids "$id" >/dev/null
     aws_ ec2 wait instance-running --instance-ids "$id"
-    log "GPU box running; vLLM is healthy in about 10 minutes (no download: weights are on the volume)"
+    log "GPU box running; waiting for vLLM to report healthy (up to 20 minutes on a first boot that has to download weights; a warm reboot is much faster)"
+    if wait_for_vllm_health; then
+      log "vLLM healthy"
+    else
+      log "vLLM still not healthy after 20 minutes; updating the gateway anyway — it will use the placeholder (fail over to Bedrock) until vLLM comes up"
+    fi
+    log "updating the gateway so it re-reads /xenia/gpu/api-base"
+    "$KIT_ROOT/scripts/box.sh" xenia-gateway Action=update
     ;;
   stop)
     aws_ ec2 stop-instances --instance-ids "$id" >/dev/null
-    log "GPU box stopping; the gateway serves from Bedrock meanwhile"
+    log "GPU box stopping; updating the gateway now so it fails over to Bedrock immediately instead of waiting on a future request to notice"
+    "$KIT_ROOT/scripts/box.sh" xenia-gateway Action=update
     ;;
   status)
     echo "gpu box: $state ($itype, profile $profile)"

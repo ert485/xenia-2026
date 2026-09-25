@@ -10,9 +10,19 @@ master="$(ssm_get gateway/master-key 2>/dev/null)" \
   || die "missing /xenia/gateway/master-key; on the laptop: printf 'sk-%s' \"\$(openssl rand -hex 32)\" | scripts/put-secret.sh gateway/master-key"
 pgpw="$(ssm_get gateway/postgres-password 2>/dev/null)" \
   || die "missing /xenia/gateway/postgres-password; on the laptop: openssl rand -hex 24 | scripts/put-secret.sh gateway/postgres-password"
-api_base="$(ssm_get gpu/api-base 2>/dev/null || echo https://gpu-not-provisioned.invalid/v1)"
+placeholder="https://gpu-not-provisioned.invalid/v1"
+api_base="$(ssm_get gpu/api-base 2>/dev/null || echo "$placeholder")"
 vllm_token="$(ssm_get gpu/vllm-token 2>/dev/null || echo unset)"
 vllm_cert="$(ssm_get gpu/vllm-cert 2>/dev/null || true)"
+
+# The SSM parameter is written once by the gpu-box stack and never cleared, so it keeps naming the
+# GPU box's EIP even when no GPU instance exists (EC2 capacity) or the box is stopped — an address
+# that drops packets instead of refusing the connection. Without this probe, LiteLLM's vLLM
+# deployment points at that dead address and every request eats the full vLLM timeout before
+# failing over to Bedrock. vllm_probe (box/lib.sh) checks the health endpoint (see
+# infra/recipes/gpu-box/watchdog.sh, same path) with a short timeout and falls back to the
+# placeholder host, which fails DNS instantly.
+api_base="$(vllm_probe "$api_base" "$vllm_token" "$placeholder")"
 
 umask 077
 install -d -m 0700 /run/xenia
