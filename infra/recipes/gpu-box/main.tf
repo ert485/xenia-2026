@@ -35,7 +35,7 @@ locals {
 resource "aws_security_group" "gpu" {
   provider    = aws.gpu
   name        = "xenia-gpu-box"
-  description = "vLLM over TLS, reachable only from the Docker box's Elastic IP"
+  description = "vLLM over TLS, reachable only from the Docker box Elastic IP"
   vpc_id      = data.aws_vpc.gpu.id
   ingress {
     description = "vLLM (TLS) from the gateway only"
