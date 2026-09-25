@@ -40,8 +40,16 @@ curl -sS https://llm.26.cohack.tetl.ca/v1/models -H "Authorization: Bearer $KEY"
 ```
 Result: `qwen3-coder`, `qwen3-coder-bedrock`.
 
-## Found and fixed
+## Known limitation: aliases don't fail over (open)
 
-The same Messages call with the alias `claude-sonnet-5` failed: LiteLLM looks up fallbacks under
-the alias name, and only `qwen3-coder` had one, so aliases never failed over to Bedrock. The fix
-adds a fallback entry for every alias, with a test that fails if an alias lacks one.
+The same Messages call with the alias `claude-sonnet-5` fails while the vLLM deployment is down.
+First attempt: `No fallback model group found for lookup_groups=claude-sonnet-5`. Adding a
+fallback entry for every alias (commit c4db619) didn't fix it: with the vLLM deployment in
+cooldown, the pre-call check rejects the alias with `No deployments available for selected model`
+before any fallback runs. The direct name `qwen3-coder` fails over correctly (above).
+
+Impact: none for the kit's clients. Claude Code sends `qwen3-coder` (`ANTHROPIC_MODEL` and every
+`ANTHROPIC_DEFAULT_*_MODEL` point there), and so do OpenCode and the PR reviewer. It only affects a
+client that sends a Claude model ID, and only while the GPU box is down. To retest on Friday with
+the GPU box up; the likely fix is to define each alias as its own model group (vLLM first, Bedrock
+second) instead of `model_group_alias`.
