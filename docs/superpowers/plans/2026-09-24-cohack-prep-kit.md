@@ -8,7 +8,7 @@
 
 **Tech Stack:** Terraform 1.5.7 with the `hashicorp/aws` provider (`~> 6.0`; fall back to `~> 5.100` only if `init` refuses the Terraform version floor), AWS CLI v2, Docker Compose v2 on Amazon Linux 2023 arm64, Caddy 2 built with `caddy-dns/route53`, LiteLLM (pinned by digest), vLLM `v0.30.0`, Claude Code `2.1.280`, OpenCode `v1.18.32`, GitHub Actions with OIDC, MkDocs Material for the kit site, `bats-core` for shell tests, `shellcheck`, `actionlint`, `zizmor`, `pinact`, `gitleaks`.
 
-**Spec:** `docs/superpowers/specs/2026-09-23-cohack-prep-kit-design.md` (v2.5.1, approved). The plan argues from the spec; executors read both. Section references below (for example "spec §10") point at that file.
+**Spec:** `docs/superpowers/specs/2026-09-23-cohack-prep-kit-design.md` (v2.6: the approved v2.5.1 plus D39, team infrastructure by PR, and D40, the access kill switch, both decided by Erik on 2026-09-24). The plan argues from the spec; executors read both. Section references below (for example "spec §10") point at that file.
 
 **Tracking:** personal project, no Notion task. PRs from this plan carry no task-ID suffix (spec header).
 
@@ -36,7 +36,7 @@ Copied from the spec; every task's requirements include these.
 - Terraform stays on the installed **1.5.7**. Two providers per stack (ca-central-1 default, us-east-1 alias `use1`). No workspaces. (spec §14)
 - Primary region **ca-central-1**; GPU box and Bedrock in **us-east-1**; CloudFront certificate in us-east-1. (D4, D5)
 - The kit repo is **public**: account IDs, zone IDs, keys, phones, emails go in gitignored files, SSM, or Codespaces secrets, never in committed files. `.gitignore` already covers `*.tfvars` (except `*.example.tfvars`) and `*.local.env`. (D32, P-public)
-- Every workflow template: `permissions: {}` at the top, `id-token: write` only inside deploy and preview jobs, no `pull_request_target`, no `workflow_run`, third-party actions **pinned by commit SHA**, account ID masked with `::add-mask::` wherever a role ARN could print, Terraform plan and apply never run in public CI. (D35, spec §12)
+- Every workflow template: `permissions: {}` at the top, `id-token: write` only inside deploy and preview jobs (and Task 30's team Terraform plan and apply jobs), no `pull_request_target`, no `workflow_run`, third-party actions **pinned by commit SHA**, account ID masked with `::add-mask::` wherever a role ARN could print. The kit's own Terraform never runs in public CI; the team stack's plan and apply do (Task 30, D39) and print only resource addresses, counts, progress, and error lines, masked, never the plan body or Terraform outputs. (D35 as amended in v2.6, spec §12)
 - Hostnames: `26.cohack.tetl.ca` (kit site), `app.26.cohack.tetl.ca` (demo), `pr-<n>.box.26.cohack.tetl.ca` (previews), `llm.26.cohack.tetl.ca` (gateway). (spec §6)
 - Caddy forwards only `/v1/messages*`, `/v1/chat/completions`, `/v1/models`, and the health paths; LiteLLM image pinned by digest with the reason recorded; master key in SSM, injected at start, never in compose. (spec §10)
 - Claude Code client settings: `ANTHROPIC_BASE_URL=https://llm.26.cohack.tetl.ca`, `ANTHROPIC_MODEL=qwen3-coder`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL=qwen3-coder`, `CLAUDE_CODE_MAX_CONTEXT_TOKENS=110000`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS=16000`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, settings `skipWebFetchPreflight: true`. (spec §10)
@@ -64,18 +64,20 @@ Read this once; later tasks refer to these names without redefining them.
 | CloudWatch log group for box containers | `/xenia/boxes` |
 | Backup bucket | `xenia-backups-<suffix>` |
 | ECR repositories | `xenia/<repo-name>` (one per allowed repo) |
-| OIDC roles | `xenia-deploy-<owner>-<repo>` and `xenia-preview-<owner>-<repo>` |
+| OIDC roles | `xenia-deploy-<owner>-<repo>` and `xenia-preview-<owner>-<repo>`; with Task 30, `xenia-plan-<owner>-<repo>` (read-only, `terraform-plan.yml` on any ref) and `xenia-infra-<owner>-<repo>` (admin with the deny list and the instance-type allow-list, `terraform-apply.yml` on `main`). Every trust uses the repo's immutable subject prefix `repo:OWNER@OWNER_ID/REPO@REPO_ID` from `infra/platform/oidc-sub-prefixes.auto.tfvars.json` |
 | Instance tags | `kit=true`, `xenia-role=docker-box` or `xenia-role=gpu-box` |
 | SSM documents (member account, ca-central-1) | `xenia-deploy`, `xenia-preview-up`, `xenia-preview-down`, `xenia-gateway` |
 | On the Docker box | kit checkout at `/srv/kit`; gateway compose at `/srv/kit/infra/recipes/docker-box/gateway`; app at `/srv/app`; previews at `/srv/previews/pr-<n>`; runtime env files under `/run/xenia/` (tmpfs, 0600) |
 | Docker networks on the box | `gateway` (bridge name `gw0`: Caddy, LiteLLM, Postgres) and `edge` (bridge name `edge0`: Caddy, app `web`, preview `web`s) |
 | Routable service convention | the team's compose has a service named `web` listening on `APP_PORT` (default 3000), publishes no host ports; the kit's overrides name the container `app-web` or `pr-<n>-web` |
-| Team-repo secrets set by `onboard-repo.sh` | `AWS_DEPLOY_ROLE_ARN`, `AWS_PREVIEW_ROLE_ARN`, `ECR_REGISTRY`, `GATEWAY_CI_KEY`, `DISCORD_WEBHOOK_URL` |
-| Team-repo variables set by `onboard-repo.sh` | `AWS_REGION=ca-central-1`, `APP_HOST=app.26.cohack.tetl.ca`, `PREVIEW_DOMAIN=box.26.cohack.tetl.ca`, `APP_PORT=3000`, `APP_DIR=.` |
+| Team-repo secrets set by `onboard-repo.sh` | `AWS_DEPLOY_ROLE_ARN`, `AWS_PREVIEW_ROLE_ARN`, `ECR_REGISTRY`, `GATEWAY_CI_KEY`, `DISCORD_WEBHOOK_URL`; with Task 30, `AWS_PLAN_ROLE_ARN`, `AWS_INFRA_ROLE_ARN` |
+| Team-repo variables set by `onboard-repo.sh` | `AWS_REGION=ca-central-1`, `APP_HOST=app.26.cohack.tetl.ca`, `PREVIEW_DOMAIN=box.26.cohack.tetl.ca`, `APP_PORT=3000`, `APP_DIR=.`; with Task 30, `TF_STATE_BUCKET` |
 | `shutdown.d/` entry header | see Appendix B |
 | Gateway model names | `qwen3-coder` (primary, vLLM), `qwen3-coder-bedrock` (failover); aliases `opus`, `sonnet`, `haiku`, `fable`, and the concrete `claude-*` IDs listed in Task 7 |
+| Team Terraform (Task 30) | folder `infra/team/` in the team repo (starter `infra/examples/team-stack/`); state key `team-<repo>.tfstate` in the kit's state bucket and `xenia-tflock`; workflows `terraform-plan.yml` (jobs `plan`, `comment`) and `terraform-apply.yml` (jobs `apply`, `notify`); label `destroy-ok`; scripts copied to `.github/kit/plan-gate.sh` and `.github/kit/plan-notify.sh` |
+| Access kill switch (Task 14) | SCP `xenia-lockdown` in the management account, unattached; `scripts/lockdown.sh [--undo] [--dry-run]` attaches it to the member account |
 
-Terraform outputs of `infra/platform` consumed by recipes via `terraform_remote_state` (key `platform.tfstate`): `zone_id`, `zone_name`, `apex_certificate_arn`, `backup_bucket`, `log_group_name`, `oidc_provider_arn`, `deploy_role_arns` (map repo → ARN), `preview_role_arns` (map), `ecr_repository_urls` (map), `ssm_prefix`.
+Terraform outputs of `infra/platform` consumed by recipes via `terraform_remote_state` (key `platform.tfstate`): `zone_id`, `zone_name`, `apex_certificate_arn`, `backup_bucket`, `log_group_name`, `oidc_provider_arn`, `deploy_role_arns` (map repo → ARN), `preview_role_arns` (map), `ecr_repository_urls` (map), `ssm_prefix`; with Task 30, `plan_role_arns` and `infra_role_arns` (maps, read by `onboard-repo.sh`). The team stack reads `platform.tfstate` the same way.
 
 ## Deviations and interpretations
 
@@ -92,6 +94,9 @@ Each preserves the spec's intent and its section 17 test. Erik reads these first
 9. **GPU box account.** Default host is the member account (quota approved there). The management-account variant is documented in Task 10 as a provider-profile variable plus a cross-account secrets-reader role, not built unless needed.
 10. **`pain-review.yml`, `pr-template-check.yml`, and the `.claude/skills/` folder are Should** per spec §12 and §3; `check.yml`, `shutdown-coverage.yml`, `render-shutdown-md.yml`, `pr-review.yml`, `publish-kit-site.yml`, `deploy-docker-box.yml`, `preview-up.yml`, `preview-down.yml` are Must.
 11. **Terraform runs as the `cohack` Identity Center profile, not through `OrganizationAccountAccessRole`.** Spec §5 mentions that role for the bootstrap; the profile Erik already has does the same job with a shorter-lived session, so the role stays unused.
+12. **The team infra role's instance-type allow-list can't see inside launch templates or fleets** (Task 30, D39). IAM checks `ec2:InstanceType` on `RunInstances` and `ec2:Attribute/InstanceType` on `ModifyInstanceAttribute`, but no condition key exposes the type inside a launch template, EC2 Fleet, Spot Fleet, or Spot request. So instead of "deny those for types outside the list", the infra role is denied those launch paths outright; `aws_instance` works. Managed services that start their own instances (EKS node groups, Batch, EMR, SageMaker) are not covered; the budget alerts are the backstop. The spec's §7 says the same.
+13. **`infra/org` imports the organization to enable SCPs** (Task 14, D40). Terraform enables a policy type only through `aws_organizations_organization`, so the hand-made organization is imported with `prevent_destroy` and `ignore_changes` on trusted access and the feature set: an apply can add the SCP policy type and nothing else. Runbook 99 removes it from state before `teardown.sh --all`.
+14. **`CODEOWNERS` owns only the rules files, not the wider blast-radius set** (Erik's decision, 2026-09-24). `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, and `CODEOWNERS` itself are the only code-owned paths; `.github/workflows/`, `.devcontainer/`, the vendored plugin, `Makefile`, compose files, and `infra/team/**` all self-merge once `make check` and shutdown coverage pass. Rules edits are rare and a team agreement, worth a second reviewer; the other paths change often mid-event as agents fix CI, and a second-owner gate there added little given every member's near-admin AWS access. The residual risk (an agent tricked into leaking the gateway CI key or the Discord webhook) is covered by per-key budgets, one-step rotation, `gitleaks`, fork skip, and the reviewer ranking CI/secrets changes as a finding.
 
 ## Review Focus
 
@@ -113,7 +118,7 @@ Input classes the spec implies but no task's tests would otherwise exercise, mos
 | Thu: bootstrap, cert live, OIDC role, budgets and SNS | 3, 4, 5 | ACM `ISSUED`; OIDC probe workflow assumes the kit deploy role; email subscription confirmed |
 | Thu: Docker box up with Caddy and the gateway | 6, 7 | `curl https://llm.26.cohack.tetl.ca/health/readiness` returns 200 over a valid certificate |
 | Thu: **Bedrock Qwen live and Claude Code proven end to end through the gateway by midday** | 7, 8 | Task 8 step 9 transcript saved to `docs/proofs/2026-09-24-claude-code-bedrock.md` |
-| Thu: `check.yml` and deploy workflow proven | 2, 9 | a PR fails on a planted key; `app.` returns 200 within five minutes of a merge |
+| Thu: `check.yml` and deploy workflow proven | 2, 9 | a PR fails on a planted key; `app.` returns 200 within five minutes of a merge (kit repo; Task 22 step 14 repeats it from a team repo) |
 | Thu: GPU box first boot, weights download started | 10 | `scripts/gpu.sh status` shows the instance running and the download progressing |
 | Fri: vLLM primary with failover verified | 10 (proof steps), 22 | gateway `/v1/models` lists `qwen3-coder`; stop the GPU box, next request succeeds via Bedrock |
 | Fri: previews | 13 | `pr-<n>.box.` 200 on a test PR, gone on close |
@@ -123,6 +128,7 @@ Input classes the spec implies but no task's tests would otherwise exercise, mos
 | Fri: backups, health check and SMS alarm | 6, 7, 22 | hourly object in the backup bucket; alarm fires when the gateway is stopped for two minutes |
 | Fri: team kit and kit site, QR flyer | 19, 20 | `https://26.cohack.tetl.ca` renders every page; QR resolves |
 | Fri: onboarding dry run | 16, 17, 22 | throwaway user receives OTP, key works in Codespaces |
+| Fri: team-repo rehearsal on `ert485/xenia-test-team` (Erik's follow-up, v2.6) | 22 steps 14 to 17 | first team-repo merge 200 on `app.` in under five minutes (success criterion 1 from a team repo, not only the kit); team-repo preview; team infra by PR if Task 30 landed; lockdown cuts a live session and a CI role, gateway stays up, `--undo` restores |
 | Fri: load test past capacity, EBS snapshot | 22 | `docs/proofs/2026-09-25-load-test.md` with tokens per second, queueing, watchdog result |
 | Fri evening: examples torn down, GPU box stopped, everything else up | 22 | `status.sh` shows Docker box up, GPU stopped, no previews |
 | Sat 08:00: `gpu.sh start`, `status.sh` green | runbook 06 | |
@@ -134,7 +140,7 @@ Anything in the Must tier not proven by Friday night is reported as such in `doc
 | §17 bullet | Owning task(s) |
 |---|---|
 | `terraform validate` and `plan` clean for every stack; `shellcheck` clean for every script | 1 (`make check`), every Terraform task |
-| Kit site over TLS at the apex; `app.` hello 200; preview opens and disappears | 19, 9, 13 |
+| Kit site over TLS at the apex; `app.` hello 200; preview opens and disappears | 19, 9, 13; 22 steps 14 and 15 (the same from a team repo) |
 | Thursday midday: Claude Code multi-step tool use through the gateway against Bedrock, including the thinking-rejection retry | 8 |
 | Friday: same task against vLLM; stop the GPU box, next request via Bedrock; four concurrent headless sessions, then more than the box sustains; tokens/s, queueing, 300-second watchdog | 10, 22 |
 | Onboarding dry run with a throwaway email: OTP invite, key issued, Codespaces session with the key as a user secret | 16, 22 |
@@ -144,7 +150,9 @@ Anything in the Must tier not proven by Friday night is reported as such in `doc
 | Secret scanning and push protection on both repos; planted LiteLLM-style key blocked or caught; planted 12-digit number fails the site build; fork PR gets neither preview nor review; IMDS unreachable from a preview container | 17, 2, 19, 13, 18 |
 | Consistency review over the initial principles reports nothing hidden; ruleset blocks self-merge of a `PRINCIPLES.md` edit and allows an app-code edit; `offboard-teammate.sh` removes a test collaborator's write access | 18, 17, 16 |
 | $10 budget notification arrives Thursday by email and SMS; Cost Explorer shows expected line items Friday | 5, 15 |
+| Access kill switch: `lockdown.sh` denies a live `hackathon-dev` session and a CI role, gateway still 200, `--undo` restores; first team-repo merge reaches `app.` in under five minutes | 14 (script, SCP), 22 steps 14 and 17 (live) |
 | Should: `contract-check.yml` fails a PR that removes a response field, passes with `breaking-ok` | 23 |
+| Should: a PR adding a tagged `t4g.nano` gets one plan comment and merging applies it; a PR removing it pauses at the gate and posts to Discord until `destroy-ok`; an `m7i.8xlarge` is denied | 30 (and 22 step 16 when Task 30 has landed) |
 
 ## Execution notes
 
@@ -165,16 +173,18 @@ xenia-2026/
   .github/{PULL_REQUEST_TEMPLATE.md,CODEOWNERS,ISSUE_TEMPLATE/}
   scripts/lib/common.sh            # env loading, profile guard, masking, logging
   scripts/tf.sh                    # terraform wrapper: backend config, TF_VAR_* from kit.local.env, masking
-  scripts/ci/{leak-check.sh,shutdown-coverage.sh,rule-feedback.sh}
+  scripts/ci/{leak-check.sh,shutdown-coverage.sh,rule-feedback.sh,plan-gate.sh,plan-notify.sh}   # plan-*: Task 30, copied to the team repo's .github/kit/
   scripts/*.sh                     # bootstrap, box, gateway-key, onboard-*, offboard-teammate, onboard-repo, rotate-key,
                                    # shutdown, startup, status, cost, gpu, logs, doctor, teardown, put-secret,
-                                   # render-shutdown-md, build-site, print-kit, loadtest, rollback, restore, snapshot, pain-review
+                                   # render-shutdown-md, build-site, print-kit, loadtest, rollback, restore, snapshot, pain-review,
+                                   # lockdown (the access kill switch, Task 14)
   shutdown.d/{10-gpu-box.sh,20-docker-box.sh,30-previews.sh}
   SHUTDOWN.md                      # rendered by `make shutdown-md`, checked in CI
   tests/*.bats, tests/fixtures/    # bats tests for every script with logic
   infra/modules/guardrail-policy/  # the deny list, shared by the permission set and the deploy role
-  infra/org/                       # management account: group, permission set, assignment, budgets, SNS
-  infra/platform/                  # member account: zone import, cert, OIDC + roles, ECR, SSM, logs, backup bucket
+  infra/org/                       # management account: group, permission set, assignment, budgets, SNS; lockdown.tf (SCPs enabled, xenia-lockdown unattached)
+  infra/platform/                  # member account: zone import, cert, OIDC + roles, ECR, SSM, logs, backup bucket;
+                                   # team-ci.tf (Task 30: plan and infra roles, state-bucket policy)
   infra/recipes/docker-box/        # main.tf iam.tf dns.tf ssm.tf user-data.sh; box/*.sh (deploy, preview-up/down, backup);
                                    # gateway/ (compose.yml Caddyfile caddy.Dockerfile litellm.config.yaml start.sh VERSIONS.md);
                                    # app/ (compose.app.yml compose.preview.yml); ssm/*.yaml (document content)
@@ -183,9 +193,10 @@ xenia-2026/
   infra/recipes/dynamodb-table/    # Should
   infra/examples/hello-docker-box/ # tiny arm64 Node app + Postgres, deployed to app.
   infra/examples/kit-site/         # the apex site instance of static-site
+  infra/examples/team-stack/       # Should (Task 30): starter copied to the team repo's infra/team/
   templates/workflows/*.yml        # check, shutdown-coverage, render-shutdown-md, pr-review, publish-kit-site,
                                    # deploy-docker-box, preview-up, preview-down, devcontainer-image, (Should) contract-check,
-                                   # pain-review, pr-template-check
+                                   # pain-review, pr-template-check, terraform-plan, terraform-apply
   templates/devcontainer/          # devcontainer.json Dockerfile init-firewall.sh refresh-firewall.sh ai.env ai.local.env.example
   templates/opencode/opencode.json
   templates/review/{review-prompt.md,consistency-prompt.md}
@@ -6583,18 +6594,16 @@ and the bot's consistency review is there to catch it.
 ```text
 # Code owners: the two or three teammates named at idea lock. Any one owner approves a change to these
 # paths; an owner's own PR needs a different owner, because GitHub never lets an author approve their
-# own PR. Everything else self-merges once CI is green (P-two-gates).
+# own PR. Everything else self-merges once CI is green (P-two-gates). Owned set is the rules files
+# only (Erik's decision, 2026-09-24): rules edits are rare and a team agreement worth a second
+# reviewer; workflows, the dev container, the plugin, Makefile, and compose files change often
+# mid-event as agents fix CI, and a second-owner gate there added little given every member's
+# near-admin AWS access. The residual risk (an agent leaking the gateway CI key or the Discord
+# webhook) is covered by per-key budgets, one-step rotation, gitleaks, fork skip, and the reviewer
+# ranking CI/secrets changes as a finding.
 /PRINCIPLES.md            @OWNER1 @OWNER2
 /PRINCIPLES-EXTENDED.md   @OWNER1 @OWNER2
 /CODEOWNERS               @OWNER1 @OWNER2
-/.github/workflows/       @OWNER1 @OWNER2
-/.devcontainer/           @OWNER1 @OWNER2
-/plugin/                  @OWNER1 @OWNER2
-/Makefile                 @OWNER1 @OWNER2
-compose*.yml              @OWNER1 @OWNER2
-compose*.yaml             @OWNER1 @OWNER2
-docker-compose*.yml       @OWNER1 @OWNER2
-docker-compose*.yaml      @OWNER1 @OWNER2
 ```
 
 `templates/team-repo/ruleset.json`:
@@ -6828,18 +6837,13 @@ Teammate: this is how we work. The why is in `PRINCIPLES.md` and `PRINCIPLES-EXT
 `.github/CODEOWNERS` (the kit's own; its principles live under `team-kit/`, and nothing here is enforced by a ruleset on the kit repo, it only requests Erik's review):
 
 ```text
-# Kit code owner. The kit repo has one maintainer; this marks the blast-radius paths for review requests.
+# Kit code owner. The kit repo has one maintainer; this marks the rules files for review requests.
+# Narrowed to match the team-repo template (Erik's decision, 2026-09-24): only the rules files ask
+# for review; workflows, dev container, plugin, Makefile, and compose files change too often mid-event
+# to gate behind a review request.
 /team-kit/PRINCIPLES.md            @ert485
 /team-kit/PRINCIPLES-EXTENDED.md   @ert485
 /.github/CODEOWNERS                @ert485
-/.github/workflows/                @ert485
-/.devcontainer/                    @ert485
-/plugin/                           @ert485
-/Makefile                          @ert485
-compose*.yml                       @ert485
-compose*.yaml                      @ert485
-docker-compose*.yml                @ert485
-docker-compose*.yaml               @ert485
 ```
 
 ```bash
@@ -7852,14 +7856,15 @@ git push
 ### Task 14: Shutdown framework and the two CI checks
 
 **Files:**
-- Create: `scripts/shutdown.sh`, `scripts/startup.sh`, `scripts/render-shutdown-md.sh`, `scripts/ci/shutdown-coverage.sh`, `SHUTDOWN.md`, `shutdown.d/README.md`, `templates/workflows/shutdown-coverage.yml`, `templates/workflows/render-shutdown-md.yml`, `.github/workflows/shutdown-coverage.yml` and `.github/workflows/render-shutdown-md.yml` (copies via `make sync-workflows`), `tests/shutdown.bats`, `tests/render-shutdown-md.bats`, `tests/shutdown-coverage.bats`
-- Modify: `Makefile` (the `shutdown-md` and `shutdown-md-check` recipes render `shutdown.d` explicitly)
+- Create: `scripts/shutdown.sh`, `scripts/startup.sh`, `scripts/render-shutdown-md.sh`, `scripts/ci/shutdown-coverage.sh`, `SHUTDOWN.md`, `shutdown.d/README.md`, `templates/workflows/shutdown-coverage.yml`, `templates/workflows/render-shutdown-md.yml`, `.github/workflows/shutdown-coverage.yml` and `.github/workflows/render-shutdown-md.yml` (copies via `make sync-workflows`), `tests/shutdown.bats`, `tests/render-shutdown-md.bats`, `tests/shutdown-coverage.bats`; for the access kill switch (spec D40, steps 14 to 17): `scripts/lockdown.sh`, `tests/lockdown.bats`, `infra/org/lockdown.tf`
+- Modify: `Makefile` (the `shutdown-md` and `shutdown-md-check` recipes render `shutdown.d` explicitly), `tests/helpers/aws-shim.sh` (four Organizations calls)
 
 **Interfaces:**
 - Consumes: `scripts/lib/common.sh` (`KIT_ROOT`, `log`, `die`, `load_env`, `require_profile`), the entries `shutdown.d/10-gpu-box.sh` (Task 10), `20-docker-box.sh` (Task 6), `30-previews.sh` (Task 13), `scripts/gpu.sh start` (Task 10), `scripts/box.sh` (Task 6), `TEAM_REPO_DIR` from `kit.local.env`.
 - Produces:
   - `scripts/shutdown.sh [--dry-run] [--offline]`: exit 0 when every entry succeeded, 1 otherwise. When the team repo can't be run, prints exactly one of `team repo skipped: TEAM_REPO_DIR unset` or `team repo skipped: <dir>/shutdown.d not found`. `SHUTDOWN_D` overrides the kit directory.
   - `scripts/startup.sh [--no-gpu]`.
+  - `scripts/lockdown.sh [--undo] [--dry-run]`: attaches (or detaches) the SCP `xenia-lockdown` to the member account as `personal-admin`; idempotent; exit 1 when the SCP doesn't exist yet or the profile is wrong. Never called by `shutdown.sh`: spend and access are separate switches. `infra/org` gains `aws_organizations_organization.this` (imported; manages only `enabled_policy_types`) and `aws_organizations_policy.lockdown` (unattached).
   - `scripts/render-shutdown-md.sh [dir ...]`: markdown on stdout; exit 1 naming the file and the missing field.
   - `scripts/ci/shutdown-coverage.sh <base-sha> <head-sha> <pr-body-file>`: exit 0 covered or not billable, 1 otherwise; run from the root of the repo being checked.
   - Workflows whose job names `shutdown-coverage` and `render-shutdown-md` are status-check contexts. Only `shutdown-coverage` (with `check`) is required by `templates/team-repo/ruleset.json`: `render-shutdown-md` has a `paths:` filter, and a required check with a path filter would leave unrelated PRs waiting forever.
@@ -8620,6 +8625,275 @@ git commit -m "Record the shutdown-coverage proof: fails without an off switch, 
 ```
 
 The full `scripts/shutdown.sh --dry-run` and real run belong to Task 22.
+
+- [ ] **Step 14: The access kill switch: failing test `tests/lockdown.bats` (spec D40)**
+
+`scripts/lockdown.sh` is the second kill switch: `shutdown.sh` stops spend, `lockdown.sh` cuts access. They stay separate commands (a leaked key wants lockdown with the boxes still up). First teach the aws shim the four Organizations calls. In `tests/helpers/aws-shim.sh`, add these cases just above the final `*) exit 0 ;;`:
+
+```bash
+  *"organizations list-policies"*)
+    if [[ -f "$FAKE_STATE/scp" ]]; then printf '{"Policies":[{"Id":"p-lockdown1","Name":"xenia-lockdown"}]}\n'
+    else printf '{"Policies":[]}\n'; fi ;;
+  *"organizations list-targets-for-policy"*)
+    if [[ -f "$FAKE_STATE/scp-attached" ]]; then printf '{"Targets":[{"TargetId":"%s","Type":"ACCOUNT"}]}\n' "${FAKE_MEMBER:-}"
+    else printf '{"Targets":[]}\n'; fi ;;
+  *"organizations attach-policy"*)  touch "$FAKE_STATE/scp-attached" ;;
+  *"organizations detach-policy"*)  rm -f "$FAKE_STATE/scp-attached" ;;
+```
+
+`tests/lockdown.bats`:
+
+```bash
+#!/usr/bin/env bats
+# scripts/lockdown.sh: attach and detach the break-glass SCP, idempotently, as personal-admin.
+setup() {
+  export KIT_ROOT="$BATS_TEST_DIRNAME/.."
+  export TMP="$BATS_TEST_TMPDIR"
+  cp "$BATS_TEST_DIRNAME/helpers/aws-shim.sh" "$TMP/aws"; chmod +x "$TMP/aws"
+  export PATH="$TMP:$PATH"
+  # 12-digit fake account IDs built at runtime, never literal (leak-check convention, see tf.bats).
+  MEMBER_ID="$(printf '%012d' 111111111)"
+  MANAGEMENT_ID="$(printf '%012d' 222222222)"
+  export MEMBER_ID MANAGEMENT_ID
+  printf 'MEMBER_ACCOUNT_ID=%s\nMANAGEMENT_ACCOUNT_ID=%s\nZONE_ID=ZFAKEZONE\n' "$MEMBER_ID" "$MANAGEMENT_ID" > "$TMP/kit.env"
+  export KIT_ENV_FILE="$TMP/kit.env" FAKE_ACCOUNT="$MANAGEMENT_ID" FAKE_MEMBER="$MEMBER_ID"
+  export FAKE_STATE="$TMP/state" AWS_CALLS="$TMP/calls"
+  mkdir -p "$FAKE_STATE"; : > "$AWS_CALLS"
+  touch "$FAKE_STATE/scp"
+}
+
+attach_calls() { grep -c "organizations attach-policy --policy-id p-lockdown1 --target-id $MEMBER_ID --profile personal-admin" "$AWS_CALLS" || true; }
+detach_calls() { grep -c "organizations detach-policy --policy-id p-lockdown1 --target-id $MEMBER_ID --profile personal-admin" "$AWS_CALLS" || true; }
+
+@test "lockdown attaches the SCP to the member account as personal-admin" {
+  run scripts/lockdown.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"lockdown: ON"* ]]
+  [ "$(attach_calls)" -eq 1 ]
+  [ -f "$FAKE_STATE/scp-attached" ]
+}
+
+@test "a second lockdown is a no-op that says so" {
+  scripts/lockdown.sh
+  run scripts/lockdown.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already on"* ]]
+  [ "$(attach_calls)" -eq 1 ]
+}
+
+@test "--undo detaches, and a second --undo is a no-op" {
+  scripts/lockdown.sh
+  run scripts/lockdown.sh --undo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"lockdown: OFF"* ]]
+  [ "$(detach_calls)" -eq 1 ]
+  run scripts/lockdown.sh --undo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already off"* ]]
+  [ "$(detach_calls)" -eq 1 ]
+}
+
+@test "--dry-run changes nothing in either direction" {
+  run scripts/lockdown.sh --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"would attach"* ]]
+  [ "$(attach_calls)" -eq 0 ]
+  touch "$FAKE_STATE/scp-attached"
+  run scripts/lockdown.sh --undo --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"would detach"* ]]
+  [ "$(detach_calls)" -eq 0 ]
+}
+
+@test "without the SCP it refuses and points at the org apply" {
+  rm -f "$FAKE_STATE/scp"
+  run scripts/lockdown.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"scripts/tf.sh org apply"* ]]
+  [ "$(attach_calls)" -eq 0 ]
+}
+
+@test "it refuses a personal-admin profile that resolves to another account" {
+  FAKE_ACCOUNT="$MEMBER_ID" run scripts/lockdown.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"different account"* ]]
+  [ "$(attach_calls)" -eq 0 ]
+}
+
+@test "it never prints an account ID" {
+  run scripts/lockdown.sh
+  [[ ! "$output" =~ [0-9]{12} ]]
+  run scripts/lockdown.sh --undo
+  [[ ! "$output" =~ [0-9]{12} ]]
+}
+
+@test "an unknown argument is refused" {
+  run scripts/lockdown.sh --now
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unknown argument"* ]]
+}
+```
+
+Run: `bats tests/lockdown.bats`
+Expected: 8 failures (`scripts/lockdown.sh: No such file or directory`); `bats tests/tf.bats tests/bootstrap.bats` still pass with the extended shim.
+
+- [ ] **Step 15: Write `scripts/lockdown.sh`**
+
+```bash
+#!/usr/bin/env bash
+# Usage: scripts/lockdown.sh [--undo] [--dry-run]
+# The access kill switch (spec D40). Attaches the break-glass SCP xenia-lockdown to the member account:
+# every identity there is denied everything, sessions already issued included (teammates' 12-hour
+# hackathon-dev sessions, agents running with them, and the deploy, preview, plan, and infra CI roles),
+# except Erik's admin Identity Center role, OrganizationAccountAccessRole, and the kit box roles, so the
+# gateway keeps answering.
+# --undo detaches it. Idempotent. Runs as personal-admin: SCPs never apply to the management account,
+# so the undo always works. Deliberately separate from shutdown.sh, which stops spend, not access.
+set -euo pipefail
+source "$(dirname "$0")/lib/common.sh"
+load_env
+require_cmd aws jq
+
+undo=0
+dry=0
+for a in "$@"; do
+  case "$a" in
+    --undo) undo=1 ;;
+    --dry-run) dry=1 ;;
+    *) die "unknown argument: $a (usage: scripts/lockdown.sh [--undo] [--dry-run])" ;;
+  esac
+done
+require_profile personal-admin "$MANAGEMENT_ACCOUNT_ID"
+
+org() { aws organizations "$@" --profile personal-admin --output json; }
+
+policy_id="$(org list-policies --filter SERVICE_CONTROL_POLICY | jq -r '.Policies[] | select(.Name == "xenia-lockdown") | .Id')"
+[[ -n "$policy_id" ]] || die "no SCP named xenia-lockdown yet: run scripts/tf.sh org apply first"
+attached="$(org list-targets-for-policy --policy-id "$policy_id" \
+  | jq -r --arg t "$MEMBER_ACCOUNT_ID" '[.Targets[] | select(.TargetId == $t)] | length')"
+
+if [[ "$undo" == 0 ]]; then
+  if [[ "$attached" != 0 ]]; then log "lockdown: already on (xenia-lockdown is attached to the member account)"; exit 0; fi
+  if [[ "$dry" == 1 ]]; then log "lockdown: dry run: would attach xenia-lockdown to the member account"; exit 0; fi
+  org attach-policy --policy-id "$policy_id" --target-id "$MEMBER_ACCOUNT_ID" >/dev/null
+  log "lockdown: ON. Every identity in the member account is denied, live sessions included, except Erik's admin role, OrganizationAccountAccessRole, and the kit box roles. The gateway keeps serving. Undo: scripts/lockdown.sh --undo"
+else
+  if [[ "$attached" == 0 ]]; then log "lockdown: already off (xenia-lockdown is not attached)"; exit 0; fi
+  if [[ "$dry" == 1 ]]; then log "lockdown: dry run: would detach xenia-lockdown from the member account"; exit 0; fi
+  org detach-policy --policy-id "$policy_id" --target-id "$MEMBER_ACCOUNT_ID" >/dev/null
+  log "lockdown: OFF. xenia-lockdown is detached; FullAWSAccess still applies, so access is as it was."
+fi
+```
+
+Run: `chmod +x scripts/lockdown.sh && bats tests/lockdown.bats && shellcheck -x scripts/lockdown.sh`
+Expected: `8 tests, 0 failures`; no findings beyond SC1091 info for the `source` line.
+
+- [ ] **Step 16: Write `infra/org/lockdown.tf` (enable SCPs, create the unattached policy)**
+
+```hcl
+# The access kill switch (spec D40). Enabling SCPs on the root makes AWS attach FullAWSAccess to every
+# root, OU, and account, so nothing changes until scripts/lockdown.sh attaches xenia-lockdown to the
+# member account. SCPs never apply to the management account.
+#
+# The organization was created by hand (runbook 00) and is imported (step 17). Terraform can enable a
+# policy type only through this resource, so it manages enabled_policy_types and nothing else: trusted
+# access (Identity Center and IAM root access management depend on it) and the feature set are ignored,
+# and the organization can never be destroyed from here (plan deviation 13).
+resource "aws_organizations_organization" "this" {
+  feature_set          = "ALL"
+  enabled_policy_types = ["SERVICE_CONTROL_POLICY"]
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [aws_service_access_principals, feature_set]
+  }
+}
+
+# Deny everything unless the caller is Erik's admin Identity Center role, OrganizationAccountAccessRole
+# (assumable only from the management account: Erik's second way in while locked), or a kit box instance role
+# (the gateway, Bedrock failover, backups, and DNS-01 keep running). Service-linked roles are never
+# affected by SCPs. Sessions already issued are cut too: SCPs are evaluated on every request.
+data "aws_iam_policy_document" "lockdown" {
+  statement {
+    sid       = "XeniaLockdown"
+    effect    = "Deny"
+    actions   = ["*"]
+    resources = ["*"]
+    condition {
+      test     = "ArnNotLike"
+      variable = "aws:PrincipalArn"
+      values = [
+        "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_admin_*",
+        "arn:aws:iam::*:role/OrganizationAccountAccessRole",
+        "arn:aws:iam::*:role/xenia-docker-box",
+        "arn:aws:iam::*:role/xenia-gpu-box",
+      ]
+    }
+  }
+}
+
+resource "aws_organizations_policy" "lockdown" {
+  name        = "xenia-lockdown"
+  description = "Break-glass access kill switch: deny everything in the member account except Erik's admin role, OrganizationAccountAccessRole, and the kit box roles. Never attached in normal operation; scripts/lockdown.sh attaches it."
+  type        = "SERVICE_CONTROL_POLICY"
+  content     = data.aws_iam_policy_document.lockdown.json
+  depends_on  = [aws_organizations_organization.this]
+}
+```
+
+No `aws_organizations_policy_attachment`: the attachment is `lockdown.sh`'s job, so an apply never locks anyone out and never unlocks them either.
+
+Run: `terraform fmt -check infra/org && make validate`
+Expected: `validate infra/org` → `Success! The configuration is valid.`
+
+- [ ] **Step 17: Import the organization, then STOP: Erik approves the org apply**
+
+Check what the root has today, then import (the organization ID goes from one command into the next and is never written to a file):
+
+```bash
+aws organizations list-roots --profile personal-admin --query 'Roots[0].PolicyTypes' --output json
+scripts/tf.sh org import aws_organizations_organization.this \
+  "$(aws organizations describe-organization --profile personal-admin --query Organization.Id --output text)"
+scripts/tf.sh org apply
+```
+Expected: `list-roots` prints `[]` (no policy types enabled; if it lists any, stop and show Erik, because `enabled_policy_types` would disable them). The import prints `Import successful!`. The apply's plan shows exactly `~ aws_organizations_organization.this` (only `enabled_policy_types` gaining `"SERVICE_CONTROL_POLICY"`, no change to `aws_service_access_principals` or `feature_set`) and `+ aws_organizations_policy.lockdown`: `1 to add, 1 to change, 0 to destroy`. Anything else, above all a destroy or a change to trusted access: answer `no` and show Erik. Otherwise Erik types `yes`.
+
+Then confirm nothing changed for anyone:
+
+```bash
+source kit.local.env
+aws organizations list-policies-for-target --target-id "$MEMBER_ACCOUNT_ID" --filter SERVICE_CONTROL_POLICY \
+  --profile personal-admin --query 'Policies[].Name' --output text
+scripts/lockdown.sh --dry-run
+aws s3 ls --profile cohack >/dev/null && echo "cohack still works"
+```
+Expected: `FullAWSAccess` only; `lockdown: dry run: would attach xenia-lockdown to the member account`; `cohack still works`.
+
+Then prove Erik's two ways in survive an attached lockdown, and that the `/aws-reserved/` exemption can't be copied:
+
+```bash
+scripts/lockdown.sh
+sleep 60
+aws s3 ls --profile cohack >/dev/null && echo "admin role: works while locked"
+creds="$(aws sts assume-role --profile personal-admin --role-session-name lockdown-check \
+  --role-arn "arn:aws:iam::$MEMBER_ACCOUNT_ID:role/OrganizationAccountAccessRole" \
+  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text)"
+read -r k s t <<< "$creds"
+AWS_ACCESS_KEY_ID="$k" AWS_SECRET_ACCESS_KEY="$s" AWS_SESSION_TOKEN="$t" aws s3 ls >/dev/null && echo "OrganizationAccountAccessRole: works while locked"
+unset creds k s t
+aws iam create-role --profile cohack --path /aws-reserved/test/ --role-name xenia-path-probe \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[]}' 2>&1 | tail -1
+scripts/lockdown.sh --undo
+```
+Expected: `lockdown: ON ...`; `admin role: works while locked`; `OrganizationAccountAccessRole: works while locked` (the assume runs in the management account, where no SCP applies); the `create-role` call fails with an error refusing the `/aws-reserved/` path (it creates nothing; if it ever succeeds, delete `xenia-path-probe` at once with `aws iam delete-role --profile cohack --role-name xenia-path-probe` and tell Erik, because the SCP's admin exemption would then be forgeable); `lockdown: OFF ...`. Nothing a teammate uses is live yet on Thursday, so the short lockdown affects no one. The live lockdown proof (a teammate session and a CI role denied, the gateway still up, then `--undo`) is Task 22 step 17, when a throwaway teammate session and a team-repo CI run exist.
+
+Commit on the current branch:
+
+```bash
+git add scripts/lockdown.sh tests/lockdown.bats tests/helpers/aws-shim.sh infra/org/lockdown.tf
+git commit -m "Add the access kill switch: an unattached lockdown SCP and lockdown.sh to attach or detach it"
+```
+
+`teardown.sh --all` must not destroy the organization: runbook 99 step 6 says to run `scripts/lockdown.sh --undo` (an attached policy can't be deleted) and `scripts/tf.sh org state rm aws_organizations_organization.this` first, because `prevent_destroy` would otherwise stop the destroy and the organization outlives the event.
 
 ### Task 15: `status.sh`, `cost.sh`, `logs.sh`
 
@@ -9483,6 +9757,8 @@ Expected: `removed from the hackathon group`, `deleted the Identity Center user`
 
 The one side effect outside the team repo is step 2: the kit's `allowed-repos.auto.tfvars.json`, `plugin/allowed-repos.txt`, and `plugin/bundled/PRINCIPLES.md` change and are committed on the kit's current branch. **Push and merge that commit the same day**: until it reaches `main`, an apply from `main` would delete the team repo's roles.
 
+**Pointer (spec v2.6):** step 1 must also read the repo's immutable OIDC subject prefix (`gh api repos/<owner>/<repo>/actions/oidc/customization/sub`, field `.sub_claim_prefix`) and step 2 must write it into `infra/platform/oidc-sub-prefixes.auto.tfvars.json` (and `git add` that file) before the apply, or every role's precondition fails for the new repo. Build that here, in Task 17: the helper `oidc_sub_prefix_set`, its test `tests/oidc-sub-prefix.bats`, and the exact lines are in Task 30 step 5 and step 11 (a) and (b). Task 30 later adds the rest of its pieces to this script (the two Terraform workflows, `.github/kit/`, `infra/team/`, the `destroy-ok` label, `AWS_PLAN_ROLE_ARN`, `AWS_INFRA_ROLE_ARN`, `TF_STATE_BUCKET`).
+
 - [ ] **Step 1: Write the failing test `tests/allowed-repos.bats`**
 
 ```bash
@@ -9863,13 +10139,23 @@ gh pr checks --watch && gh pr merge --squash --delete-branch
 ```
 Expected: both required checks pass and the merge succeeds with no review.
 
+```bash
+git switch main && git switch -c workflow-edit
+printf '\n# comment (ruleset proof)\n' >> .github/workflows/check.yml
+git add .github/workflows/check.yml && git commit -qm "Workflow comment (ruleset proof)"
+git push -q -u origin workflow-edit
+gh pr create --title "Ruleset proof: workflow edit self-merges" --body "$(printf "Proves .github/workflows/ is no longer code-owned (Erik's decision, 2026-09-24): only the rules files (PRINCIPLES.md, PRINCIPLES-EXTENDED.md, CODEOWNERS) require a second owner.\n\nRule-feedback: none\nShutdown: none needed because only a comment changes\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")"
+gh pr checks --watch && gh pr merge --squash --delete-branch
+```
+Expected: both required checks pass (and `pr-review` may comment) and the merge succeeds with no owner review, confirming `.github/workflows/` self-merges under the narrowed `CODEOWNERS`.
+
 Offboarding a collaborator: Erik has one GitHub account. If a friend has agreed to lend a handle for five minutes, invite them with step 9's command, run `scripts/offboard-teammate.sh <any-onboarded-test-email> --github <their-handle>`, and show `gh api repos/ert485/xenia-test-team/invitations --jq length` drop to `0` and `gh api repos/ert485/xenia-test-team/collaborators --jq '.[].login'` list only `ert485`. Without a second handle, record "one-account limitation: the collaborator-removal path is covered by `tests/teammates.bats` only".
 
 Keep `ert485/xenia-test-team` until Sunday (the Saturday rehearsal and Task 22 use it), then `gh repo delete ert485/xenia-test-team --yes` and remove it from the two allow-lists by PR.
 
 - [ ] **Step 8: Record the proof and commit**
 
-Write `docs/proofs/2026-09-25-onboard-repo.md` with the `time` of the first run, the second run's "already" lines, the `security_and_analysis` JSON, the two PR URLs with the refusal text and the successful merge, and the offboarding result or the one-account limitation. Run `scripts/ci/leak-check.sh docs/proofs/2026-09-25-onboard-repo.md` (expect no output), then:
+Write `docs/proofs/2026-09-25-onboard-repo.md` with the `time` of the first run, the second run's "already" lines, the `security_and_analysis` JSON, the three PR URLs (the blocked `PRINCIPLES.md` edit, the ordinary-file self-merge, and the `.github/workflows/` self-merge) with the refusal text and the two successful merges, and the offboarding result or the one-account limitation. Run `scripts/ci/leak-check.sh docs/proofs/2026-09-25-onboard-repo.md` (expect no output), then:
 
 ```bash
 cd ~/Code/xenia-2026
@@ -11490,9 +11776,13 @@ Status: **to do** Sunday 2026-09-27 and after.
 
 Erik: nobody keeps access or data by accident.
 
-1. **Sunday 12:00**: remove the `hackathon` group's access to the member account:
+1. **Sunday 12:00**, in this order: stop what costs money, cut every live session, then remove the group's access. The lockdown matters because removing an assignment leaves sessions already issued alive for up to 12 hours; the SCP cuts them at once, CI roles included, and keeps the gateway up.
 
+        scripts/shutdown.sh
+        scripts/lockdown.sh
         scripts/tf.sh org destroy -target=aws_ssoadmin_account_assignment.hackathon_member
+
+   Leave the lockdown on. If the team still needs a deploy for a post-event demo, `scripts/lockdown.sh --undo`, deploy, and lock again.
 
 2. **Sunday 12:00**: unsubscribe the night-shift phone from `xenia-gateway-alarm`:
 
@@ -11505,7 +11795,7 @@ Erik: nobody keeps access or data by accident.
 3. **After the retro**: shred the sign-up sheet.
 4. **After the retro**: delete `~/.xenia/teammates.tsv` once every teammate is offboarded (`scripts/offboard-teammate.sh <email>` for each).
 5. **A week later**: delete the private idea-lock Discord channel.
-6. **When the team is done with the demo**: `scripts/teardown.sh` (workloads), then `scripts/teardown.sh --all` (platform and org).
+6. **When the team is done with the demo**: `scripts/teardown.sh` (workloads), then, before `scripts/teardown.sh --all` (platform and org): `scripts/lockdown.sh --undo` (an attached policy can't be deleted) and `scripts/tf.sh org state rm aws_organizations_organization.this` (the organization outlives the event, and `prevent_destroy` would stop the destroy).
 7. **Close the member account**: sign in to the management account console, **AWS Organizations, AWS accounts**, select `cohack-26`, **Close**. The account is suspended for 90 days (billing for anything left stops; it can be reopened in that window), then closed for good. Remaining S3 objects are deleted with it.
 ```
 
@@ -11742,11 +12032,11 @@ Expected: `make leak` prints nothing (every ID is a placeholder or read from `ki
 ### Task 22: Friday proof run (load test, backups, alarm, onboarding dry run, shutdown, evening state)
 
 **Files:**
-- Create: `scripts/loadtest.sh`, `scripts/snapshot.sh`, `tests/proof-tools.bats`, `docs/proofs/README.md`, and the proof files named in each step below (`docs/proofs/2026-09-25-*.md`)
+- Create: `scripts/loadtest.sh`, `scripts/snapshot.sh`, `tests/proof-tools.bats`, `docs/proofs/README.md`, and the proof files named in each step below (`docs/proofs/2026-09-25-*.md`, including `2026-09-25-team-rehearsal.md` for steps 14 to 17)
 - Modify: `infra/recipes/gpu-box/models.yaml` (`max_num_seqs` from the load test)
 
 **Interfaces:**
-- Consumes: everything from Tasks 1 to 21. Key names: `scripts/status.sh`, `scripts/shutdown.sh`, `scripts/startup.sh`, `scripts/gpu.sh start|stop|status|weights|model <name>`, `scripts/box.sh xenia-gateway Action=status|logs|restart|app-down`, `scripts/box.sh xenia-preview-down Pr=all`, `scripts/onboard-teammate.sh`, `scripts/offboard-teammate.sh`, `scripts/cost.sh`, the `x-litellm-model-id` header values `qwen3-coder-vllm` and `qwen3-coder-bedrock`, the alarm `xenia-llm-gateway-down` on topic `xenia-gateway-alarm`.
+- Consumes: everything from Tasks 1 to 21, including `scripts/lockdown.sh` (Task 14), the onboarded `ert485/xenia-test-team` (Task 17), and Task 30's workflows when that task has landed. Key names: `scripts/status.sh`, `scripts/shutdown.sh`, `scripts/startup.sh`, `scripts/gpu.sh start|stop|status|weights|model <name>`, `scripts/box.sh xenia-gateway Action=status|logs|restart|app-down`, `scripts/box.sh xenia-preview-down Pr=all`, `scripts/onboard-teammate.sh`, `scripts/offboard-teammate.sh`, `scripts/cost.sh`, the `x-litellm-model-id` header values `qwen3-coder-vllm` and `qwen3-coder-bedrock`, the alarm `xenia-llm-gateway-down` on topic `xenia-gateway-alarm`.
 - Produces:
   - `scripts/loadtest.sh <concurrency> [--turns 6] [--skip-agents]`: markdown tables on stdout. Streams: per stream wall time, time to first token, longest silence between chunks, tokens, tokens per second, and `WATCHDOG` when a silence reaches `WATCHDOG_SECONDS` (default 300, Claude Code's silent-stream limit). Agents: per session wall time, turns, and result. Agent sessions skip permissions, so they run only inside the dev container (charter C11): the script refuses elsewhere unless `--skip-agents`.
   - `scripts/snapshot.sh [gpu|box]`: snapshots the instance's root volume, tags it `kit=true`, prints the snapshot ID. Used Friday for the GPU weights and Sunday 03:00 at the scope freeze (charter C7; Task 26 refers to it).
@@ -12086,7 +12376,7 @@ Run Task 16 step 7 (the throwaway plus-address through invitation, portal login,
 3. `claude -p "Agent: list the files in this repo's root and say which one holds the team rules." --max-turns 3`. Expected: an answer naming `PRINCIPLES.md`.
 4. Time from "Create codespace" to the answer. Expected: under five minutes with the prebuild in place (spec section 1, criterion 3).
 
-Then offboard. Add the Codespace timing to `docs/proofs/2026-09-25-onboarding.md`.
+Keep the throwaway user onboarded until step 17 (the lockdown proof needs its live session), then offboard. Add the Codespace timing to `docs/proofs/2026-09-25-onboarding.md`.
 
 - [ ] **Step 11: Re-run and link the CI proofs**
 
@@ -12124,7 +12414,86 @@ scripts/box.sh xenia-gateway Action=restart
 ```
 Expected: within about three minutes the `OK` notification arrives by SMS and email, and the alarm state is `OK`. Record the four times (stop, ALARM received, restart, OK received) in `docs/proofs/2026-09-25-alarm.md`, without the phone number or the address.
 
-- [ ] **Step 14: Kill switch and restore (spec section 17)**
+- [ ] **Step 14: Team-repo rehearsal, part 1: the first merge from a team repo reaches `app.` (spec §1, success criterion 1)**
+
+Steps 14 to 17 rehearse Saturday on `ert485/xenia-test-team` (onboarded in Task 17, kept until Sunday). The kit's own deploy was proven in Task 9; this proves the path a real team takes: the team repo's own deploy role (its immutable OIDC prefix written by `onboard-repo.sh`), its own ECR repository, and its own merge. The team app **replaces the kit's hello example on `app.`**; that is expected on Friday, and step 20 takes `app.` down anyway.
+
+One-account limitation: the test repo's only code owner is Erik, and GitHub never lets an author approve their own PR, so a PR touching an owned path can't merge on its own. Since `CODEOWNERS` now owns only the rules files (Erik's decision, 2026-09-24: `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, `CODEOWNERS` itself), this only bites a `PRINCIPLES.md`-touching PR; compose files and `.github/workflows/` self-merge like any other path. The `ruleset` helper below stays for that one case, if this rehearsal touches the rules files at all — the app and infra merges in the rest of this task don't need it.
+
+```bash
+ruleset() {  # ruleset <owner/repo> active|disabled
+  local id
+  id="$(gh api "repos/$1/rulesets" --jq '.[] | select(.name == "main") | .id')"
+  gh api "repos/$1/rulesets/$id" | jq --arg e "$2" '{name, target, enforcement: $e, bypass_actors, conditions, rules}' \
+    | gh api -X PUT "repos/$1/rulesets/$id" --input - >/dev/null
+  gh api "repos/$1/rulesets/$id" --jq .enforcement
+}
+```
+
+Push the hello app as the team's app, under `app/` so the team repo's root `make check` stays the template's:
+
+```bash
+team=ert485/xenia-test-team
+cd "$(mktemp -d)" && gh repo clone "$team" . -- -q
+git switch -c add-app
+mkdir -p app
+cp ~/Code/xenia-2026/infra/examples/hello-docker-box/{Dockerfile,server.js,package.json,compose.yml} app/
+git add app && git commit -qm "Add the team's first app (hello, rehearsal)"
+git push -q -u origin add-app
+gh variable set APP_DIR --body app --repo "$team"
+gh pr create --title "Rehearsal: first app" --body "$(printf 'The first team app, to prove a merge reaches app.\n\nRule-feedback: none\nShutdown: none needed because the app runs on the kit Docker box, which shutdown.d/20-docker-box.sh already stops\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
+gh pr checks --watch
+date -u +%T && gh pr merge --squash --delete-branch
+gh run watch "$(gh run list --repo "$team" --workflow deploy-docker-box.yml -L 1 --json databaseId --jq '.[0].databaseId')" --repo "$team"
+date -u +%T && curl -sI https://app.26.cohack.tetl.ca | head -1 && curl -s https://app.26.cohack.tetl.ca
+```
+Expected: `check` and `shutdown-coverage` green; the merge succeeds with no owner review, since `app/` and its compose file aren't code-owned; the preview for this PR comes up too (step 15 checks previews on its own PR). The `deploy-docker-box` run on the team repo assumes `xenia-deploy-ert485-xenia-test-team` (an OIDC failure here means the sub prefix in `oidc-sub-prefixes.auto.tfvars.json` is wrong), builds on `ubuntu-24.04-arm`, pushes to `xenia/xenia-test-team`, and ends `deploy status: Success`. `curl -sI` prints `HTTP/2 200` and the body shows `sha:` equal to the team repo's merge commit. The two `date` lines are under five minutes apart. Proof file line (`docs/proofs/2026-09-25-team-rehearsal.md`): `Criterion 1 from a team repo: merge <time>, 200 at <time>, <n> min <s> s, run <URL>; no ruleset toggle needed (app/ and compose files aren't code-owned)`.
+
+- [ ] **Step 15: Team-repo rehearsal, part 2: a preview from the team repo**
+
+```bash
+git switch main && git pull -q && git switch -c preview-probe
+printf '\n// preview probe\n' >> app/server.js
+git commit -qam "Preview probe (rehearsal)" && git push -q -u origin preview-probe
+gh pr create --title "Rehearsal: preview probe" --body "$(printf 'Proves a team-repo preview.\n\nRule-feedback: none\nShutdown: none needed because previews are removed by preview-down and shutdown.d/30-previews.sh\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
+n="$(gh pr view --json number --jq .number)"
+gh pr checks --watch || true
+gh pr view --json comments --jq '.comments[].body' | grep -o "https://pr-$n\.box\.26\.cohack\.tetl\.ca[^ )]*" | head -1
+curl -sI "https://pr-$n.box.26.cohack.tetl.ca" | head -1
+gh pr close --delete-branch
+sleep 90 && curl -s -o /dev/null -w '%{http_code}\n' "https://pr-$n.box.26.cohack.tetl.ca"
+```
+Expected: a URL comment naming `https://pr-<n>.box.26.cohack.tetl.ca`; `HTTP/2 200`; after close, `preview-down` removes it and the last `curl` prints a non-200 code (Caddy answers 404 or 502 for an unknown preview). The file under `app/` isn't code-owned, so no ruleset toggle. Proof file line: `Team-repo preview: PR <n>, 200 at <time>, gone at <time>`.
+
+- [ ] **Step 16: Team-repo rehearsal, part 3: team infrastructure by PR (only if Task 30 has landed)**
+
+If `templates/workflows/terraform-apply.yml` is not on the kit's `main`, write `Team infra: not rehearsed (Task 30 not landed)` in the proof file and go to step 17. Otherwise run Task 30 step 13 (a) to (c) on the same repo: a PR adding a tagged `t4g.nano` under `infra/team/` gets one plan comment with counts and addresses only, masked, and merging applies it; a PR removing it stops at the destroy gate and posts to Discord, `destroy-ok` plus a re-run destroys it and posts the completion; a PR adding an `m7i.8xlarge` fails at apply with `UnauthorizedOperation` from the instance-type allow-list. The `kit-sync` PR that brings the two workflows touches `.github/workflows/`, which self-merges like any other path now that `CODEOWNERS` owns only the rules files, so no ruleset toggle is needed. Proof file lines: the three PR URLs, the plan-comment count lines, the three Discord message first lines, and the `UnauthorizedOperation` line; Task 30's own proof file gets the full record.
+
+- [ ] **Step 17: Team-repo rehearsal, part 4: the access kill switch on the live setup (spec D40)**
+
+Needs a live `hackathon-dev` session: the Task 16 throwaway user from step 10, still onboarded (step 10 offboards it after this step), logged in as the `cohack-dev` profile.
+
+```bash
+aws s3 ls --profile cohack-dev >/dev/null && echo "member: works"
+gh workflow run deploy-docker-box.yml --repo ert485/xenia-test-team && sleep 10
+gh run watch "$(gh run list --repo ert485/xenia-test-team --workflow deploy-docker-box.yml -L 1 --json databaseId --jq '.[0].databaseId')" --repo ert485/xenia-test-team
+scripts/lockdown.sh
+sleep 60
+aws s3 ls --profile cohack-dev 2>&1 | tail -1
+aws ec2 describe-instances --region ca-central-1 --profile cohack-dev --query 'Reservations[].Instances[].InstanceId' --output text 2>&1 | tail -1
+gh workflow run deploy-docker-box.yml --repo ert485/xenia-test-team && sleep 10
+gh run watch "$(gh run list --repo ert485/xenia-test-team --workflow deploy-docker-box.yml -L 1 --json databaseId --jq '.[0].databaseId')" --repo ert485/xenia-test-team || true
+curl -s -o /dev/null -w '%{http_code}\n' https://llm.26.cohack.tetl.ca/health/readiness
+aws s3 ls --profile cohack >/dev/null && echo "erik admin: works"
+scripts/lockdown.sh --undo
+sleep 60
+aws s3 ls --profile cohack-dev >/dev/null && echo "member: works again"
+gh workflow run deploy-docker-box.yml --repo ert485/xenia-test-team && sleep 10
+gh run watch "$(gh run list --repo ert485/xenia-test-team --workflow deploy-docker-box.yml -L 1 --json databaseId --jq '.[0].databaseId')" --repo ert485/xenia-test-team
+```
+Expected, in order: `member: works` and a green deploy run (the baseline); `lockdown: ON ...`; the member's `s3 ls` and `describe-instances` both end in an `AccessDenied` or `UnauthorizedOperation` line naming an explicit deny in a service control policy (the session was issued before the lockdown, which is the point); the deploy run fails at its first AWS call after `configure-aws-credentials` (the ECR login) with `AccessDenied` (the web-identity assume itself may succeed; every call the role then makes is denied); the gateway still answers `200`; `erik admin: works`; `lockdown: OFF ...`; `member: works again` and a green deploy run. If the first denied call still succeeds, wait another minute (Organizations changes take a short time to reach every endpoint) and retry once before calling it a failure. Proof file lines: `Lockdown ON at <time>: member session denied (<error code>), team-repo deploy denied (run <URL>), gateway 200, Erik's admin works; OFF at <time>: member and deploy work again (run <URL>)`. Then offboard the throwaway user (step 10's last instruction).
+
+- [ ] **Step 18: Kill switch and restore (spec section 17)**
 
 ```bash
 scripts/shutdown.sh --dry-run
@@ -12142,7 +12511,7 @@ scripts/status.sh
 ```
 Expected: `startup.sh` starts the Docker box, restarts the gateway, removes leftover previews, starts the GPU box, and prints `run scripts/status.sh in five minutes`; `gpu.sh weights` lists the model repository under `/data/hf/hub` (no new download); vLLM healthy within 10 minutes; `status.sh` ends `status: green` and the alarm is back to `OK`. Record everything in `docs/proofs/2026-09-25-shutdown-startup.md`.
 
-- [ ] **Step 15: Budget alert and Cost Explorer (spec section 17)**
+- [ ] **Step 19: Budget alert and Cost Explorer (spec section 17)**
 
 Find the time of Thursday's `$10` notification in the SNS email and on the phone, and paste both times (not the address or the number). Then:
 
@@ -12151,7 +12520,7 @@ scripts/cost.sh
 ```
 Expected: month-to-date rows for EC2 compute, EC2 other (EBS), Route 53, and Bedrock, and a total in line with section 16's estimate for two days. Record in `docs/proofs/2026-09-25-budget-and-cost.md`.
 
-- [ ] **Step 16: The Friday evening state**
+- [ ] **Step 20: The Friday evening state**
 
 ```bash
 scripts/box.sh xenia-gateway Action=app-down
@@ -12161,7 +12530,7 @@ scripts/status.sh || true
 ```
 Expected: `status.sh` shows the Docker box running, `gateway: ready` with `completion served by qwen3-coder-bedrock`, `previews: none`, `gpu: stopped (the gateway serves from Bedrock)`, and the backup and alarm lines `ok`. Record in `docs/proofs/2026-09-25-evening-state.md`. Saturday 08:00 starts from here (runbook 06).
 
-- [ ] **Step 17: Write `docs/proofs/README.md`**
+- [ ] **Step 21: Write `docs/proofs/README.md`**
 
 Write the table below, then set each Status cell from the proof files: `proven` when the file shows the expected result, otherwise `not proven: <one-line reason>`. Nothing unproven is left looking done (spec section 15).
 
@@ -12193,11 +12562,13 @@ Each row is a Must-tier item from the spec (section 3) with the file that proves
 | 19 | `$10` budget alert by email and SMS; Cost Explorer line items | `2026-09-25-budget-and-cost.md` | pending |
 | 20 | EBS snapshot of the weights | `2026-09-25-snapshot.md` | pending |
 | 21 | Friday evening state: examples down, GPU stopped, the rest up | `2026-09-25-evening-state.md` | pending |
+| 22 | First merge from a team repo reaches `app.` in under five minutes (criterion 1), and a team-repo preview | `2026-09-25-team-rehearsal.md` | pending |
+| 23 | Access kill switch: `lockdown.sh` cuts a live teammate session and a CI role, the gateway stays up, `--undo` restores | `2026-09-25-team-rehearsal.md` | pending |
 ```
 
 When every row is set, `grep -c '| pending |' docs/proofs/README.md` must print `0`.
 
-- [ ] **Step 18: Leak-check and commit the proofs**
+- [ ] **Step 22: Leak-check and commit the proofs**
 
 ```bash
 scripts/ci/leak-check.sh docs/proofs
@@ -12462,7 +12833,7 @@ From the team repo root:
     make types
     git add contracts src/contracts .github/workflows/contract-check.yml
 
-Open a PR. `.github/workflows/` is a code-owned path, so an owner other than the author approves it.
+Open a PR. `.github/workflows/` isn't code-owned (only `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, and `CODEOWNERS` are), so it self-merges once `make check` and shutdown coverage pass.
 
 ## What the check does on every PR
 
@@ -13598,8 +13969,10 @@ Teammate: fill these in at the 11:30 architecture checkpoint and keep them curre
 - Agent: never create, edit, or commit `.devcontainer/ai.local.env` or any other `*.local.env` file.
 - Agent: never run with AWS credentials. Ship by pushing a branch; CI deploys (C11). If a task seems to need
   AWS access, stop and ask the teammate.
-- Agent: never edit `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, `CODEOWNERS`, `.github/workflows/`, or
-  `.devcontainer/` unless the teammate asked for exactly that change; those paths need an owner's approval.
+- Agent: never edit `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, or `CODEOWNERS` unless the teammate asked
+  for exactly that change; those are the only paths that need a different owner's approval (Erik's
+  decision, 2026-09-24). `.github/workflows/` and `.devcontainer/` self-merge behind `make check` and
+  shutdown coverage, but still get flagged by the reviewer as a CI/secrets-handling change worth a look.
 - Agent: never post to the team channel or open an issue for `/pain` or `/rule-feedback` before the teammate
   confirms the wording.
 - Agent: after fifteen minutes of looping with no progress, stop and hand back to the teammate (P-wheel).
@@ -13848,7 +14221,7 @@ git add -A && git commit -m "Refresh team templates from the kit" && git push -u
 gh pr create --title "Refresh team templates" --body "$(printf 'Template refresh from the kit.\n\nRule-feedback: none\nShutdown: none needed because docs and Makefile only\n')"
 make preview-url
 ```
-Expected: `make check` prints `check: no project yet ...` (the test repo has no app); the last `make preview-url` prints `https://pr-<n>.box.26.cohack.tetl.ca`. The `Makefile` is a code-owned path, so this PR shows "review required" for the single owner; that is the ruleset working (Task 17), not a failure. Close the PR unmerged. Record the output and the time in `docs/proofs/2026-09-25-team-repo-templates.md` (redact with `scripts/ci/leak-check.sh docs/proofs` before committing).
+Expected: `make check` prints `check: no project yet ...` (the test repo has no app); the last `make preview-url` prints `https://pr-<n>.box.26.cohack.tetl.ca`. `Makefile` isn't a code-owned path (only the rules files are, since v2.6), so this PR needs no owner review, just green checks — that's the ruleset working as narrowed (Task 17), not a failure. Close the PR unmerged (it's a throwaway refresh, not meant to land). Record the output and the time in `docs/proofs/2026-09-25-team-repo-templates.md` (redact with `scripts/ci/leak-check.sh docs/proofs` before committing).
 
 - [ ] **Step 10: Commit and open the PR**
 
@@ -14974,6 +15347,1586 @@ gh pr create --title "Should tier: Resource Explorer untagged-resource signal" -
 gh pr checks --watch && gh pr merge --squash --delete-branch
 ```
 Expected: `check` and `shutdown-coverage` green, PR merged.
+
+### Task 30: Team infrastructure by PR, applied on merge (runs after Task 17)
+
+Spec D39 (v2.6), §7, §12, §17. Should tier: shipped as templates, proven in the throwaway team repo only if Friday allows. It runs after Task 17 because it extends `onboard-repo.sh`, and after Task 12 because it edits `labels.json`, `CLAUDE.md`, and `PRINCIPLES-EXTENDED.md` in the team-repo templates.
+
+**Files:**
+- Create: `infra/platform/team-ci.tf`, `scripts/ci/plan-gate.sh`, `scripts/ci/plan-notify.sh`, `tests/plan-gate.bats`, `tests/plan-notify.bats`, `tests/oidc-sub-prefix.bats`, `tests/fixtures/plan/{create-only.json,destroy-replace.json,no-changes.json}`, `templates/workflows/terraform-plan.yml`, `templates/workflows/terraform-apply.yml`, `infra/examples/team-stack/{versions.tf,variables.tf,main.tf,README.md}`
+- Modify: `infra/modules/guardrail-policy/main.tf` (two role patterns), `infra/platform/variables.tf` (`team_instance_types`), `infra/platform/outputs.tf` (`plan_role_arns`, `infra_role_arns`), `scripts/lib/allowed-repos.sh` (`oidc_sub_prefix_set`, unless Task 17 already added it), `scripts/onboard-repo.sh` (steps 1, 2, 3, 8, 10), `templates/team-repo/labels.json` (`destroy-ok`), `templates/team-repo/CLAUDE.md` (one line), `team-kit/PRINCIPLES-EXTENDED.md` (one sentence under P-wheel), `Makefile` (`STACKS` gains `examples/team-stack`)
+- Proof (if Friday allows): `docs/proofs/2026-09-25-team-infra.md`
+
+**Interfaces:**
+- Consumes: `aws_iam_openid_connect_provider.github`, `module.guardrail`, and the locals `repo_slug`, `sub_prefix`, `sub_prefix_ok` from `infra/platform/oidc.tf` (Task 4); `var.allowed_repos`, `var.oidc_sub_prefixes`, `var.state_bucket`, `var.member_account_id`; `scripts/tf.sh platform apply|output`; Task 17's `onboard-repo.sh` and `scripts/lib/allowed-repos.sh`; Task 12's `labels.json`, `CODEOWNERS`, `CLAUDE.md`; the `DISCORD_WEBHOOK_URL` repo secret (Task 17 step 8); the state bucket and `xenia-tflock` lock table (Task 3); the `shutdown-coverage` policy (Task 14) for the proof PRs.
+- Produces:
+  - IAM roles per allowed repo: `xenia-plan-<owner>-<repo>` (read-only, trusted from `terraform-plan.yml` on any ref) and `xenia-infra-<owner>-<repo>` (admin with the deny list and the instance-type allow-list, trusted from `terraform-apply.yml` on `main`). Platform outputs `plan_role_arns` and `infra_role_arns` (maps repo → ARN, sensitive).
+  - A bucket policy on the state bucket: both roles may touch only `team-<repo>.tfstate` and read `platform.tfstate`; the `hackathon-dev` role may not read `org.tfstate` (it holds Erik's alert email and phone). Takes effect with this task's platform apply.
+  - `scripts/ci/plan-gate.sh summarize|comment|has-destroys|gate` and `scripts/ci/plan-notify.sh message|post`, copied into the team repo as `.github/kit/plan-gate.sh` and `.github/kit/plan-notify.sh`. The summary JSON they share: `{"add":N,"change":N,"destroy":N,"changes":[{"action":"create|update|delete|replace","address":"..."}]}`. `gate` exits 0 to apply and 3 to stop.
+  - Workflows `terraform-plan` (jobs `plan`, `comment`) and `terraform-apply` (jobs `apply`, `notify`); state key `team-<repo>.tfstate`; team Terraform folder `infra/team/` (from `infra/examples/team-stack/`).
+  - Team-repo secrets `AWS_PLAN_ROLE_ARN`, `AWS_INFRA_ROLE_ARN`; variable `TF_STATE_BUCKET`; label `destroy-ok`; the PR-comment marker `<!-- xenia-terraform-plan -->` and `<!-- xenia-discord-notified -->`.
+
+Decisions recorded here:
+
+- **Instance-type allow-list default:** `t4g.nano` to `t4g.large`, `t3.nano` to `t3.large`, and `m7g.medium`, `m7g.large`, `m7g.xlarge`. `t4g` is the Docker box's family (arm64, cheapest per vCPU, and the proof's `t4g.nano` must pass); `t3` covers images with no arm64 build; `m7g` gives steady CPU without burst credits. The largest, `m7g.xlarge` (4 vCPU, 16 GiB), is about $0.18 an hour in ca-central-1, so five of them left on for a day are about $22, inside the $25 alert tier. Every GPU family (`g*`, `p*`, `inf*`, `trn*`), every `.2xlarge` and up, and the metal sizes are denied. One variable, `team_instance_types`, changes it (Erik's apply).
+- **Launch paths IAM can't inspect are denied outright** (plan deviation 12). IAM checks `ec2:InstanceType` on `RunInstances`, and `ec2:Attribute/InstanceType` on `ModifyInstanceAttribute` (step 12 checks this key with the simulator and for real), but no condition key exposes the instance type inside a launch template, an EC2 Fleet, a Spot Fleet, or a Spot request. So the infra role is denied `CreateLaunchTemplate`, `CreateLaunchTemplateVersion`, `ModifyLaunchTemplate`, `CreateFleet`, `ModifyFleet`, `RequestSpotFleet`, `ModifySpotFleetRequest`, and `RequestSpotInstances`. `aws_instance` works. Managed services that start their own instances (EKS node groups, Batch, EMR, SageMaker) are not covered; the budget alerts are the backstop there.
+- **The kit repo gets the two roles too**, because they are keyed on `allowed_repos` like `deploy` and `preview`. They are unused (the kit has no `terraform-apply.yml`), and their trust needs a workflow file the kit does not have. Kit stacks stay manual (spec D39).
+- **Re-running a stopped apply.** The gate reads the merged PR's labels when it runs, so after `destroy-ok` is added, re-running the stopped run applies. A run stops without planning if `main` has a newer change to the stack than its own commit, so a re-run of an old run can never apply older configuration over newer state.
+- **The notify and comment jobs hold no OIDC**, and the plan and apply jobs hold no webhook secret: each job holds one kind of credential. The comment job runs the base branch's copy of the kit scripts, so a PR can't change what the job holding the write token executes.
+
+- [ ] **Step 1: Write the plan fixtures and the failing `tests/plan-gate.bats`**
+
+The fixtures are the shape of `terraform show -json` output, cut down to the fields the scripts read plus attribute values the scripts must never pass on (`hunter2-do-not-print`, `t4g.nano`). `ACCOUNT_ID` is replaced at test time with a 12-digit number, so no 12-digit literal lands in the repo (leak check).
+
+`tests/fixtures/plan/create-only.json`:
+
+```json
+{
+  "format_version": "1.2",
+  "terraform_version": "1.5.7",
+  "resource_changes": [
+    {
+      "address": "aws_instance.probe",
+      "mode": "managed",
+      "type": "aws_instance",
+      "name": "probe",
+      "change": { "actions": ["create"], "before": null, "after": { "instance_type": "t4g.nano", "tags": { "Name": "team-infra-probe" } } }
+    },
+    {
+      "address": "data.aws_ssm_parameter.al2023_arm64",
+      "mode": "data",
+      "type": "aws_ssm_parameter",
+      "name": "al2023_arm64",
+      "change": { "actions": ["read"], "before": null, "after": { "name": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64" } }
+    }
+  ]
+}
+```
+
+`tests/fixtures/plan/destroy-replace.json`:
+
+```json
+{
+  "format_version": "1.2",
+  "terraform_version": "1.5.7",
+  "resource_changes": [
+    { "address": "aws_instance.probe", "mode": "managed", "type": "aws_instance", "name": "probe",
+      "change": { "actions": ["delete"], "before": { "instance_type": "t4g.nano", "user_data": "hunter2-do-not-print" }, "after": null } },
+    { "address": "aws_instance.web", "mode": "managed", "type": "aws_instance", "name": "web",
+      "change": { "actions": ["delete", "create"], "before": { "instance_type": "t4g.small" }, "after": { "instance_type": "t4g.medium" } } },
+    { "address": "aws_s3_bucket.assets", "mode": "managed", "type": "aws_s3_bucket", "name": "assets",
+      "change": { "actions": ["create", "delete"], "before": { "bucket": "team-assets-a" }, "after": { "bucket": "team-assets-b" } } },
+    { "address": "aws_security_group.web", "mode": "managed", "type": "aws_security_group", "name": "web",
+      "change": { "actions": ["update"], "before": { "description": "old" }, "after": { "description": "new" } } },
+    { "address": "aws_iam_role.app", "mode": "managed", "type": "aws_iam_role", "name": "app",
+      "change": { "actions": ["no-op"], "before": { "name": "team-app" }, "after": { "name": "team-app" } } },
+    { "address": "aws_sqs_queue.jobs", "mode": "managed", "type": "aws_sqs_queue", "name": "jobs",
+      "change": { "actions": ["create"], "before": null, "after": { "name": "team-jobs" } } },
+    { "address": "aws_iam_role_policy_attachment.extra[\"arn:aws:iam::ACCOUNT_ID:policy/team-extra\"]", "mode": "managed",
+      "type": "aws_iam_role_policy_attachment", "name": "extra",
+      "change": { "actions": ["delete"], "before": { "policy_arn": "arn:aws:iam::ACCOUNT_ID:policy/team-extra" }, "after": null } },
+    { "address": "data.aws_caller_identity.me", "mode": "data", "type": "aws_caller_identity", "name": "me",
+      "change": { "actions": ["read"], "before": null, "after": { "account_id": "ACCOUNT_ID" } } }
+  ]
+}
+```
+
+`tests/fixtures/plan/no-changes.json`:
+
+```json
+{
+  "format_version": "1.2",
+  "terraform_version": "1.5.7",
+  "resource_changes": [
+    { "address": "aws_iam_role.app", "mode": "managed", "type": "aws_iam_role", "name": "app",
+      "change": { "actions": ["no-op"], "before": { "name": "team-app" }, "after": { "name": "team-app" } } }
+  ]
+}
+```
+
+`tests/plan-gate.bats`:
+
+```bash
+#!/usr/bin/env bats
+# scripts/ci/plan-gate.sh: summary JSON from a plan, the PR comment, and the destroy-ok gate.
+setup() {
+  G="$BATS_TEST_DIRNAME/../scripts/ci/plan-gate.sh"
+  FX="$BATS_TEST_DIRNAME/fixtures/plan"
+  T="$BATS_TEST_TMPDIR"
+  sed "s/ACCOUNT_ID/$(printf '%012d' 7)/g" "$FX/destroy-replace.json" > "$T/destroy-replace.json"
+  "$G" summarize "$FX/create-only.json" > "$T/create.sum"
+  "$G" summarize "$T/destroy-replace.json" > "$T/destroy.sum"
+}
+
+# bats ignores a leading `!` except on a test's last line, so negative greps use this.
+nogrep() { if grep -q "$@"; then echo "unexpected match: $*"; return 1; fi; }
+
+@test "summarize counts a create-only plan and drops data-source reads" {
+  [ "$(jq -c '[.add, .change, .destroy]' "$T/create.sum")" = '[1,0,0]' ]
+  [ "$(jq -c '.changes' "$T/create.sum")" = '[{"action":"create","address":"aws_instance.probe"}]' ]
+}
+
+@test "summarize counts both replace orders as one add and one destroy, like terraform's plan line" {
+  [ "$(jq -c '[.add, .change, .destroy]' "$T/destroy.sum")" = '[3,1,4]' ]
+  [ "$(jq -r '.changes[] | select(.action == "replace") | .address' "$T/destroy.sum" | tr '\n' ' ')" = 'aws_instance.web aws_s3_bucket.assets ' ]
+}
+
+@test "summarize leaves out no-op resources and data sources" {
+  nogrep -e 'aws_iam_role.app' "$T/destroy.sum"
+  nogrep -e 'data\.' "$T/destroy.sum"
+}
+
+@test "summarize never carries attribute values" {
+  nogrep -e 'hunter2' "$T/destroy.sum"
+  nogrep -e 't4g' "$T/destroy.sum" "$T/create.sum"
+  nogrep -e 'team-assets' "$T/destroy.sum"
+}
+
+@test "summarize masks a 12-digit account ID inside an address" {
+  nogrep -E '[0-9]{12}' "$T/destroy.sum"
+  grep -qF 'arn:aws:iam::<account-id>:policy/team-extra' "$T/destroy.sum"
+}
+
+@test "summarize of a plan with nothing to do is zero everywhere" {
+  run "$G" summarize "$FX/no-changes.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"add":0,"change":0,"destroy":0,"changes":[]}' ]
+}
+
+@test "summarize refuses a file that is not terraform show -json output" {
+  echo '{"foo": 1}' > "$T/bad.json"
+  run "$G" summarize "$T/bad.json"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not terraform show -json output"* ]]
+}
+
+@test "has-destroys is true only when something is deleted or replaced" {
+  run "$G" has-destroys "$T/destroy.sum"
+  [ "$status" -eq 0 ]
+  run "$G" has-destroys "$T/create.sum"
+  [ "$status" -eq 1 ]
+}
+
+@test "gate passes a plan with no deletes or replaces" {
+  run "$G" gate "$T/create.sum"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no deletes or replaces"* ]]
+}
+
+@test "gate stops deletes and replaces without destroy-ok and lists only those, masked" {
+  run "$G" gate "$T/destroy.sum" review
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"delete aws_instance.probe"* ]]
+  [[ "$output" == *"replace aws_s3_bucket.assets"* ]]
+  [[ "$output" != *"aws_sqs_queue.jobs"* ]]
+  [[ ! "$output" =~ [0-9]{12} ]]
+}
+
+@test "gate lets deletes through when destroy-ok is among the labels" {
+  run "$G" gate "$T/destroy.sum" review destroy-ok
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"destroy-ok"* ]]
+}
+
+@test "gate does not accept a look-alike label" {
+  run "$G" gate "$T/destroy.sum" destroy-ok-please Destroy-OK "destroy-ok "
+  [ "$status" -eq 3 ]
+}
+
+@test "comment: marker first, counts, the rows, the destroy-ok note, no values" {
+  run "$G" comment "$T/destroy.sum" https://github.com/o/team/actions/runs/9
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = '<!-- xenia-terraform-plan -->' ]
+  [[ "$output" == *"**3 to add, 1 to change, 4 to destroy.**"* ]]
+  [[ "$output" == *'| replace | `aws_instance.web` |'* ]]
+  [[ "$output" == *'`destroy-ok`'* ]]
+  [[ "$output" == *"Agent: add"* ]]
+  [[ "$output" == *"Run: https://github.com/o/team/actions/runs/9"* ]]
+  [[ "$output" != *"hunter2"* ]]
+}
+
+@test "comment for a plan with no deletes has no destroy-ok note" {
+  run "$G" comment "$T/create.sum"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"**1 to add, 0 to change, 0 to destroy.**"* ]]
+  [[ "$output" != *"destroy-ok"* ]]
+}
+
+@test "comment for a failed plan says it failed and points at the run" {
+  : > "$T/empty.sum"
+  run "$G" comment "$T/empty.sum" https://github.com/o/team/actions/runs/9
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = '<!-- xenia-terraform-plan -->' ]
+  [[ "$output" == *"failed"* ]]
+  [[ "$output" == *"https://github.com/o/team/actions/runs/9"* ]]
+}
+
+@test "comment strips backticks, pipes, and newlines from an address so the table can't break" {
+  jq -nc '{add: 1, change: 0, destroy: 0, changes: [{action: "create", address: "aws_x.y[\"a`b|c\nd\"]"}]}' > "$T/odd.sum"
+  run "$G" comment "$T/odd.sum"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'| create | `aws_x.y["abcd"]` |'* ]]
+}
+```
+
+Run: `bats tests/plan-gate.bats`
+Expected: 16 failures (`setup` can't run `scripts/ci/plan-gate.sh: No such file or directory`).
+
+- [ ] **Step 2: Write `scripts/ci/plan-gate.sh`**
+
+```bash
+#!/usr/bin/env bash
+# Usage:
+#   plan-gate.sh summarize <plan.json>               terraform show -json output -> summary JSON on stdout
+#   plan-gate.sh comment <summary.json> [run-url]    the one PR comment (Markdown); an empty file means the plan failed
+#   plan-gate.sh has-destroys <summary.json>         exit 0 if anything is deleted or replaced, 1 if not
+#   plan-gate.sh gate <summary.json> [label...]      exit 0 to apply, 3 to stop (deletes or replaces, no destroy-ok)
+# Summary JSON: {"add":N,"change":N,"destroy":N,"changes":[{"action":"create|update|delete|replace","address":"..."}]}.
+# Counts match terraform's own plan line (a replace is one add and one destroy). Only actions and resource
+# addresses ever leave the plan, never attribute values, and every line printed passes the 12-digit mask
+# (spec D35, D39). The team repo runs a copy of this file from .github/kit/. Exit 2 on a usage error.
+set -euo pipefail
+
+mask() { sed -E 's/[0-9]{12}/<account-id>/g'; }
+die() { printf 'plan-gate: %s\n' "$*" >&2; exit 2; }
+need_file() { [[ -f "$1" ]] || die "no such file: $1"; }
+destroy_count() {
+  local d
+  d="$(jq -r '.destroy' "$1" 2>/dev/null)" || die "$1 is not a summary"
+  [[ "$d" =~ ^[0-9]+$ ]] || die "$1 is not a summary"
+  printf '%s' "$d"
+}
+
+summarize() {
+  need_file "$1"
+  jq -e 'type == "object" and has("format_version")' "$1" >/dev/null 2>&1 \
+    || die "$1 is not terraform show -json output"
+  jq -c '
+    def act:
+      .change.actions as $a
+      | if ($a | index("delete")) and ($a | index("create")) then "replace"
+        elif $a == ["create"] then "create"
+        elif $a == ["update"] then "update"
+        elif $a == ["delete"] then "delete"
+        else empty end;
+    [ (.resource_changes // [])[] | select(.mode == "managed") | {action: act, address} ] as $c
+    | { add: ([$c[] | select(.action == "create" or .action == "replace")] | length),
+        change: ([$c[] | select(.action == "update")] | length),
+        destroy: ([$c[] | select(.action == "delete" or .action == "replace")] | length),
+        changes: $c }' "$1" | mask
+}
+
+# shellcheck disable=SC2016 # the backticks are Markdown, not command substitution
+comment() {
+  local f="$1" run_url="${2:-}" dir="${TF_DIR:-infra/team}"
+  printf '<!-- xenia-terraform-plan -->\n'
+  if [[ ! -s "$f" ]]; then
+    printf '### Terraform plan for `%s`: failed\n\n' "$dir"
+    printf 'The plan did not finish. The run log shows the error lines, masked: %s\n' "${run_url:-see the Actions tab}"
+    return 0
+  fi
+  destroy_count "$f" >/dev/null
+  jq -r --arg dir "$dir" '
+    def clean: gsub("[`|\r\n]"; "");
+    "### Terraform plan for `\($dir)`\n",
+    "**\(.add) to add, \(.change) to change, \(.destroy) to destroy.**\n",
+    (if (.changes | length) == 0 then "No changes."
+     else "| Action | Address |", "|---|---|",
+          (.changes[:50][] | "| \(.action) | `\(.address | clean)` |"),
+          (if (.changes | length) > 50 then "\n…and \((.changes | length) - 50) more." else empty end)
+     end),
+    (if .destroy > 0 then
+       "\n**This plan deletes or replaces \(.destroy) resource(s).** The apply after merge stops until this PR carries the `destroy-ok` label. Teammate: read the delete and replace rows above before adding it.\n\nAgent: add `destroy-ok` only after showing the teammate those rows and hearing them approve it in this session."
+     else empty end),
+    "\nAddresses and counts only: the plan body stays off this public page."' "$f" | mask
+  if [[ -n "$run_url" ]]; then printf '\nRun: %s\n' "$run_url"; fi
+}
+
+gate() {
+  local f="$1" d l
+  shift
+  need_file "$f"
+  d="$(destroy_count "$f")"
+  if [[ "$d" == 0 ]]; then
+    echo "gate: no deletes or replaces"
+    return 0
+  fi
+  for l in "$@"; do
+    if [[ "$l" == "destroy-ok" ]]; then
+      echo "gate: destroy-ok is on the merged PR; $d delete(s) or replace(s) go ahead"
+      return 0
+    fi
+  done
+  echo "gate: stopped: $d delete(s) or replace(s) and no destroy-ok label on the merged PR"
+  jq -r '.changes[] | select(.action == "delete" or .action == "replace") | "  \(.action) \(.address)"' "$f" | mask
+  return 3
+}
+
+cmd="${1:-}"
+shift || true
+case "$cmd" in
+  summarize) [[ $# -eq 1 ]] || die "usage: plan-gate.sh summarize <plan.json>"; summarize "$1" ;;
+  comment) [[ $# -ge 1 ]] || die "usage: plan-gate.sh comment <summary.json> [run-url]"; comment "$@" ;;
+  has-destroys)
+    [[ $# -eq 1 ]] || die "usage: plan-gate.sh has-destroys <summary.json>"
+    need_file "$1"
+    [[ "$(destroy_count "$1")" -gt 0 ]] ;;
+  gate) [[ $# -ge 1 ]] || die "usage: plan-gate.sh gate <summary.json> [label...]"; gate "$@" ;;
+  *) die "usage: plan-gate.sh summarize|comment|has-destroys|gate ..." ;;
+esac
+```
+
+Run: `chmod +x scripts/ci/plan-gate.sh && bats tests/plan-gate.bats && shellcheck scripts/ci/plan-gate.sh`
+Expected: `16 tests, 0 failures`; no shellcheck findings.
+
+- [ ] **Step 3: Write the failing `tests/plan-notify.bats`**
+
+```bash
+#!/usr/bin/env bats
+# scripts/ci/plan-notify.sh: the team-channel text (P-comms) and the webhook post.
+setup() {
+  N="$BATS_TEST_DIRNAME/../scripts/ci/plan-notify.sh"
+  G="$BATS_TEST_DIRNAME/../scripts/ci/plan-gate.sh"
+  FX="$BATS_TEST_DIRNAME/fixtures/plan"
+  T="$BATS_TEST_TMPDIR"
+  sed "s/ACCOUNT_ID/$(printf '%012d' 7)/g" "$FX/destroy-replace.json" > "$T/destroy-replace.json"
+  "$G" summarize "$T/destroy-replace.json" > "$T/destroy.sum"
+  "$G" summarize "$FX/create-only.json" > "$T/create.sum"
+  export GITHUB_REPOSITORY=o/team
+  PR=https://github.com/o/team/pull/7
+  RUN=https://github.com/o/team/actions/runs/9
+  export CALLS="$T/curl-calls" PAYLOAD="$T/payload.json"
+  : > "$CALLS"
+  mkdir -p "$T/bin"
+  cat > "$T/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CALLS"
+cat > "$PAYLOAD"
+exit "${CURL_EXIT:-0}"
+EOF
+  chmod +x "$T/bin/curl"
+  export PATH="$T/bin:$PATH"
+  unset DISCORD_WEBHOOK_URL
+}
+
+@test "paused message: PR link, counts, only the deleted and replaced addresses, masked" {
+  run "$N" message paused "$T/destroy.sum" "$PR" "$RUN"
+  [ "$status" -eq 0 ]
+  expected="$(cat <<'EOF'
+Terraform apply paused in o/team: the plan deletes or replaces 4 resource(s).
+PR: https://github.com/o/team/pull/7
+Plan: 3 to add, 1 to change, 4 to destroy.
+Deleted or replaced:
+- delete aws_instance.probe
+- replace aws_instance.web
+- replace aws_s3_bucket.assets
+- delete aws_iam_role_policy_attachment.extra["arn:aws:iam::<account-id>:policy/team-extra"]
+Add the destroy-ok label to the PR to proceed, then re-run the stopped run: https://github.com/o/team/actions/runs/9
+EOF
+)"
+  [ "$output" = "$expected" ]
+}
+
+@test "message masks an account ID even in a hand-made summary" {
+  jq -nc --arg a "aws_iam_role.x[\"$(printf '%012d' 42)\"]" \
+    '{add: 0, change: 0, destroy: 1, changes: [{action: "delete", address: $a}]}' > "$T/raw.sum"
+  run "$N" message paused "$T/raw.sum" "$PR"
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ [0-9]{12} ]]
+  [[ "$output" == *'aws_iam_role.x["<account-id>"]'* ]]
+}
+
+@test "applied message ends with the run link" {
+  run "$N" message applied "$T/destroy.sum" "$PR" "$RUN"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "Terraform apply finished in o/team and deleted or replaced 4 resource(s)." ]
+  [ "${lines[${#lines[@]}-1]}" = "Run: $RUN" ]
+}
+
+@test "pr-plan message says the apply after merge will stop" {
+  run "$N" message pr-plan "$T/destroy.sum" "$PR" "$RUN"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "Terraform plan on a PR in o/team deletes or replaces 4 resource(s)." ]
+  [ "${lines[${#lines[@]}-1]}" = "The apply after merge stops until the PR carries the destroy-ok label." ]
+}
+
+@test "a missing PR link says so instead of printing an empty line" {
+  run "$N" message paused "$T/destroy.sum" "" "$RUN"
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = "PR: none found for this commit" ]
+}
+
+@test "an unknown kind is a usage error" {
+  run "$N" message shouting "$T/destroy.sum" "$PR"
+  [ "$status" -eq 2 ]
+}
+
+@test "post skips with one log line when the webhook secret is unset" {
+  run "$N" post paused "$T/destroy.sum" "$PR" "$RUN"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DISCORD_WEBHOOK_URL is not set; skipping"* ]]
+  [ ! -s "$CALLS" ]
+}
+
+@test "post skips a pr-plan or applied summary that deletes nothing" {
+  export DISCORD_WEBHOOK_URL=https://discord.invalid/api/webhooks/1/token-do-not-print
+  run "$N" post pr-plan "$T/create.sum" "$PR" "$RUN"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to post"* ]]
+  [ ! -s "$CALLS" ]
+}
+
+@test "post sends the masked text with mentions off and never prints the URL" {
+  export DISCORD_WEBHOOK_URL=https://discord.invalid/api/webhooks/1/token-do-not-print
+  run "$N" post paused "$T/destroy.sum" "$PR" "$RUN"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"posted paused"* ]]
+  [[ "$output" != *"token-do-not-print"* ]]
+  [[ "$(jq -r .content "$PAYLOAD")" == "Terraform apply paused in o/team"* ]]
+  [ "$(jq -c .allowed_mentions "$PAYLOAD")" = '{"parse":[]}' ]
+  [[ ! "$(jq -r .content "$PAYLOAD")" =~ [0-9]{12} ]]
+}
+
+@test "a failed post fails loudly without printing the URL" {
+  export DISCORD_WEBHOOK_URL=https://discord.invalid/api/webhooks/1/token-do-not-print CURL_EXIT=22
+  run "$N" post paused "$T/destroy.sum" "$PR" "$RUN"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"failed"* ]]
+  [[ "$output" != *"token-do-not-print"* ]]
+}
+```
+
+Run: `bats tests/plan-notify.bats`
+Expected: 10 failures (`scripts/ci/plan-notify.sh: No such file or directory`).
+
+- [ ] **Step 4: Write `scripts/ci/plan-notify.sh`**
+
+```bash
+#!/usr/bin/env bash
+# Usage:
+#   plan-notify.sh message <pr-plan|paused|applied> <summary.json> <pr-url|""> [run-url]   print the team-channel text
+#   plan-notify.sh post    <pr-plan|paused|applied> <summary.json> <pr-url|""> [run-url]   post it to DISCORD_WEBHOOK_URL
+# P-comms for team infrastructure (spec D39): the text carries the PR link, the counts, and only the deleted
+# or replaced addresses, masked. `post` skips with one log line (exit 0) when DISCORD_WEBHOOK_URL is unset,
+# and when a pr-plan or applied summary deletes and replaces nothing. The webhook URL is never printed.
+# The summary is plan-gate.sh's JSON. The team repo runs a copy of this file from .github/kit/.
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+mask() { sed -E 's/[0-9]{12}/<account-id>/g'; }
+die() { printf 'plan-notify: %s\n' "$*" >&2; exit 2; }
+
+message() {
+  local kind="$1" f="$2" pr="${3:-}" run="${4:-}" repo="${GITHUB_REPOSITORY:-this repo}" n
+  case "$kind" in pr-plan|paused|applied) ;; *) die "unknown kind: $kind (pr-plan, paused, applied)" ;; esac
+  [[ -s "$f" ]] || die "no summary: $f"
+  n="$(jq -r '.destroy' "$f")"
+  case "$kind" in
+    pr-plan) printf 'Terraform plan on a PR in %s deletes or replaces %s resource(s).\n' "$repo" "$n" ;;
+    paused)  printf 'Terraform apply paused in %s: the plan deletes or replaces %s resource(s).\n' "$repo" "$n" ;;
+    applied) printf 'Terraform apply finished in %s and deleted or replaced %s resource(s).\n' "$repo" "$n" ;;
+  esac
+  printf 'PR: %s\n' "${pr:-none found for this commit}"
+  jq -r '"Plan: \(.add) to add, \(.change) to change, \(.destroy) to destroy."' "$f"
+  printf 'Deleted or replaced:\n'
+  jq -r '[.changes[] | select(.action == "delete" or .action == "replace")] as $d
+         | ($d[:20][] | "- \(.action) \(.address)"),
+           (if ($d | length) > 20 then "- …and \(($d | length) - 20) more" else empty end)' "$f"
+  case "$kind" in
+    pr-plan) printf 'The apply after merge stops until the PR carries the destroy-ok label.\n' ;;
+    paused)  printf 'Add the destroy-ok label to the PR to proceed, then re-run the stopped run%s\n' "${run:+: $run}" ;;
+    applied) if [[ -n "$run" ]]; then printf 'Run: %s\n' "$run"; fi ;;
+  esac
+}
+
+post() {
+  local kind="$1" f="$2" text
+  if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
+    echo "plan-notify: DISCORD_WEBHOOK_URL is not set; skipping the team-channel post"
+    return 0
+  fi
+  if [[ "$kind" != paused ]] && ! "$here/plan-gate.sh" has-destroys "$f"; then
+    echo "plan-notify: nothing deleted or replaced; nothing to post"
+    return 0
+  fi
+  text="$(message "$@" | mask)"
+  if ! jq -n --arg c "${text:0:1900}" '{content: $c, allowed_mentions: {parse: []}}' \
+      | curl -fsS --max-time 15 -o /dev/null -H 'Content-Type: application/json' --data-binary @- "$DISCORD_WEBHOOK_URL" 2>/dev/null; then
+    echo "plan-notify: the post to the team channel failed (the webhook URL is not shown)"
+    return 1
+  fi
+  echo "plan-notify: posted $kind to the team channel"
+}
+
+cmd="${1:-}"
+shift || true
+[[ $# -ge 2 ]] || die "usage: plan-notify.sh message|post <pr-plan|paused|applied> <summary.json> <pr-url> [run-url]"
+case "$cmd" in
+  message) message "$@" | mask ;;
+  post) post "$@" ;;
+  *) die "usage: plan-notify.sh message|post ..." ;;
+esac
+```
+
+`curl`'s own error text goes to `/dev/null` because `-S` would print it and some curl errors name the host; the fixed line replaces it.
+
+Run: `chmod +x scripts/ci/plan-notify.sh && bats tests/plan-notify.bats tests/plan-gate.bats && shellcheck scripts/ci/plan-notify.sh`
+Expected: `26 tests, 0 failures`; no shellcheck findings.
+
+- [ ] **Step 5: The OIDC subject-prefix helper (skip if Task 17 already built it)**
+
+Task 17 carries a pointer to this step, because Task 17's platform apply fails the roles' precondition without a prefix entry. If `grep -q oidc_sub_prefix_set scripts/lib/allowed-repos.sh` succeeds, Task 17 built it: skip to step 6.
+
+`tests/oidc-sub-prefix.bats`:
+
+```bash
+#!/usr/bin/env bats
+setup() {
+  cd "$BATS_TEST_DIRNAME/.."
+  S="$BATS_TEST_TMPDIR/prefixes.json"
+  printf '{\n  "oidc_sub_prefixes": {\n    "ert485/xenia-2026": "repo:ert485@6201488/xenia-2026@1384206368"\n  }\n}\n' > "$S"
+  source scripts/lib/allowed-repos.sh
+}
+
+@test "a new repo's prefix is added and the existing entry is kept" {
+  oidc_sub_prefix_set "$S" o/team "repo:o@11/team@22"
+  [ "$(jq -r '.oidc_sub_prefixes["o/team"]' "$S")" = "repo:o@11/team@22" ]
+  [ "$(jq -r '.oidc_sub_prefixes["ert485/xenia-2026"]' "$S")" = "repo:ert485@6201488/xenia-2026@1384206368" ]
+}
+
+@test "setting the same prefix twice changes nothing" {
+  oidc_sub_prefix_set "$S" o/team "repo:o@11/team@22"
+  cp "$S" "$BATS_TEST_TMPDIR/once.json"
+  oidc_sub_prefix_set "$S" o/team "repo:o@11/team@22"
+  cmp -s "$S" "$BATS_TEST_TMPDIR/once.json"
+}
+
+@test "the old mutable form is refused" {
+  run oidc_sub_prefix_set "$S" o/team "repo:o/team"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not an immutable OIDC subject prefix"* ]]
+  [ "$(jq -r '.oidc_sub_prefixes["o/team"] // "absent"' "$S")" = absent ]
+}
+
+@test "a prefix for another repo is refused" {
+  run oidc_sub_prefix_set "$S" o/team "repo:o@11/other@22"
+  [ "$status" -eq 1 ]
+  run oidc_sub_prefix_set "$S" o/team "repo:x@11/team@22"
+  [ "$status" -eq 1 ]
+}
+
+@test "a repo name with dots works" {
+  oidc_sub_prefix_set "$S" o/team.app "repo:o@11/team.app@22"
+  [ "$(jq -r '.oidc_sub_prefixes["o/team.app"]' "$S")" = "repo:o@11/team.app@22" ]
+}
+```
+
+Run: `bats tests/oidc-sub-prefix.bats`
+Expected: 5 failures (`oidc_sub_prefix_set: command not found`).
+
+Append to `scripts/lib/allowed-repos.sh`:
+
+```bash
+# oidc_sub_prefix_set <json-file> <owner/repo> <prefix>: record the repo's immutable OIDC subject prefix,
+# repo:OWNER@OWNER_ID/REPO@REPO_ID, from gh api repos/OWNER/REPO/actions/oidc/customization/sub
+# (.sub_claim_prefix). Every role's trust policy is built from it (infra/platform/oidc.tf). Idempotent.
+oidc_sub_prefix_set() {
+  local path="$1" repo="$2" prefix="$3"
+  if [[ ! "$prefix" =~ ^repo:([^@/]+)@[0-9]+/([^@/]+)@[0-9]+$ ]]; then
+    printf 'error: %s is not an immutable OIDC subject prefix (repo:OWNER@ID/REPO@ID)\n' "$prefix" >&2
+    return 1
+  fi
+  if [[ "${BASH_REMATCH[1]}" != "${repo%%/*}" || "${BASH_REMATCH[2]}" != "${repo#*/}" ]]; then
+    printf 'error: %s does not name %s\n' "$prefix" "$repo" >&2
+    return 1
+  fi
+  python3 - "$path" "$repo" "$prefix" <<'PY'
+import json
+import sys
+
+path, repo, prefix = sys.argv[1:4]
+with open(path, encoding="utf-8") as fh:
+    data = json.load(fh)
+data.setdefault("oidc_sub_prefixes", {})[repo] = prefix
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write(json.dumps(data, indent=2) + "\n")
+PY
+}
+```
+
+Run: `bats tests/oidc-sub-prefix.bats tests/allowed-repos.bats && shellcheck -x scripts/lib/allowed-repos.sh`
+Expected: `9 tests, 0 failures`; no findings.
+
+- [ ] **Step 6: Protect the new roles in the guard rail**
+
+In `infra/modules/guardrail-policy/main.tf`, statement `DenyKitIamMutation`, add two lines after the `xenia-preview-*` line, so neither `hackathon-dev`, `deploy`, nor the infra role itself can edit, detach, or delete them (the infra role could otherwise delete its own instance-type deny):
+
+```hcl
+      "arn:aws:iam::${var.account_id}:role/xenia-preview-*",
+      "arn:aws:iam::${var.account_id}:role/xenia-plan-*",
+      "arn:aws:iam::${var.account_id}:role/xenia-infra-*",
+```
+
+The existing `DenyKitBucketMutation` statement already denies `s3:PutBucketPolicy` and `s3:DeleteBucketPolicy` on `xenia-tfstate-*`, which keeps step 7's bucket policy in place against every guarded role.
+
+- [ ] **Step 7: Write `infra/platform/team-ci.tf`, the variable, and the outputs**
+
+`infra/platform/team-ci.tf`:
+
+```hcl
+# Team infrastructure by PR, applied on merge (spec D39, Should tier). Two more roles per allowed repo:
+#   plan:  ReadOnlyAccess + the deny list + no /xenia parameters, secrets, or backups; trusted only from
+#          that repo's terraform-plan.yml, on any ref (a PR's context is pull_request).
+#   infra: AdministratorAccess + the deny list + the instance-type allow-list; trusted only from
+#          terraform-apply.yml on a push to main.
+# Reuses oidc.tf's locals (repo_slug, sub_prefix, sub_prefix_ok) and module.guardrail. A guard rail,
+# not a boundary: an administrator role can create a new role without the deny (spec section 5).
+
+locals {
+  team_state_key = { for r, _ in var.allowed_repos : r => "team-${split("/", r)[1]}.tfstate" }
+}
+
+data "aws_iam_policy_document" "plan_trust" {
+  for_each = var.allowed_repos
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    # Any context, but only this workflow file as the job's workflow. Git ref names can't contain ':',
+    # so no branch name can smuggle ":job_workflow_ref:" into another workflow's subject.
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["${local.sub_prefix[each.key]}:*:job_workflow_ref:${each.key}/.github/workflows/terraform-plan.yml@*"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "infra_trust" {
+  for_each = var.allowed_repos
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["${local.sub_prefix[each.key]}:ref:refs/heads/main:job_workflow_ref:${each.key}/.github/workflows/terraform-apply.yml@refs/heads/main"]
+    }
+  }
+}
+
+# The plan role runs a PR's Terraform, which can run arbitrary code, so it reads nothing secret.
+data "aws_iam_policy_document" "plan_extra_deny" {
+  statement {
+    sid     = "DenyKitParameters"
+    effect  = "Deny"
+    actions = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory", "ssm:GetParametersByPath"]
+    # parameter/ and parameter/xenia too: GetParametersByPath is authorized against the path asked for.
+    resources = [
+      "arn:aws:ssm:*:${var.member_account_id}:parameter/",
+      "arn:aws:ssm:*:${var.member_account_id}:parameter/xenia",
+      "arn:aws:ssm:*:${var.member_account_id}:parameter/xenia/*",
+    ]
+  }
+  statement {
+    sid       = "DenySecretValues"
+    effect    = "Deny"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:BatchGetSecretValue"]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "DenyBackupObjects"
+    effect    = "Deny"
+    actions   = ["s3:GetObject", "s3:GetObjectVersion"]
+    resources = ["arn:aws:s3:::xenia-backups-*/*"]
+  }
+}
+
+data "aws_iam_policy_document" "instance_types" {
+  statement {
+    sid       = "DenyLaunchOutsideAllowList"
+    effect    = "Deny"
+    actions   = ["ec2:RunInstances"]
+    resources = ["arn:aws:ec2:*:*:instance/*"]
+    condition {
+      test     = "StringNotEquals"
+      variable = "ec2:InstanceType"
+      values   = var.team_instance_types
+    }
+  }
+  # Only when the call sets the instance type: a negated operator alone would also match calls that
+  # don't carry the key (changing a security group), so the Null test comes first.
+  statement {
+    sid       = "DenyResizeOutsideAllowList"
+    effect    = "Deny"
+    actions   = ["ec2:ModifyInstanceAttribute"]
+    resources = ["arn:aws:ec2:*:*:instance/*"]
+    condition {
+      test     = "Null"
+      variable = "ec2:Attribute/InstanceType"
+      values   = ["false"]
+    }
+    condition {
+      test     = "StringNotEquals"
+      variable = "ec2:Attribute/InstanceType"
+      values   = var.team_instance_types
+    }
+  }
+  # No IAM condition key exposes the instance type inside these, so they are denied outright (deviation 12).
+  statement {
+    sid    = "DenyLaunchPathsIamCannotInspect"
+    effect = "Deny"
+    actions = [
+      "ec2:CreateLaunchTemplate", "ec2:CreateLaunchTemplateVersion", "ec2:ModifyLaunchTemplate",
+      "ec2:CreateFleet", "ec2:ModifyFleet", "ec2:RequestSpotFleet", "ec2:ModifySpotFleetRequest",
+      "ec2:RequestSpotInstances",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role" "plan" {
+  for_each             = var.allowed_repos
+  name                 = "xenia-plan-${local.repo_slug[each.key]}"
+  assume_role_policy   = data.aws_iam_policy_document.plan_trust[each.key].json
+  max_session_duration = 3600
+  lifecycle {
+    precondition {
+      condition     = local.sub_prefix_ok[each.key]
+      error_message = "oidc_sub_prefixes has no valid entry for this repo: it needs repo:OWNER@OWNER_ID/REPO@REPO_ID from gh api repos/OWNER/REPO/actions/oidc/customization/sub (.sub_claim_prefix), in infra/platform/oidc-sub-prefixes.auto.tfvars.json."
+    }
+  }
+}
+resource "aws_iam_role_policy_attachment" "plan_read_only" {
+  for_each   = var.allowed_repos
+  role       = aws_iam_role.plan[each.key].name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+resource "aws_iam_role_policy" "plan_guardrail" {
+  for_each = var.allowed_repos
+  role     = aws_iam_role.plan[each.key].id
+  name     = "guardrail"
+  policy   = module.guardrail.json
+}
+resource "aws_iam_role_policy" "plan_extra_deny" {
+  for_each = var.allowed_repos
+  role     = aws_iam_role.plan[each.key].id
+  name     = "plan-no-secrets"
+  policy   = data.aws_iam_policy_document.plan_extra_deny.json
+}
+
+resource "aws_iam_role" "infra" {
+  for_each             = var.allowed_repos
+  name                 = "xenia-infra-${local.repo_slug[each.key]}"
+  assume_role_policy   = data.aws_iam_policy_document.infra_trust[each.key].json
+  max_session_duration = 3600
+  lifecycle {
+    precondition {
+      condition     = local.sub_prefix_ok[each.key]
+      error_message = "oidc_sub_prefixes has no valid entry for this repo: it needs repo:OWNER@OWNER_ID/REPO@REPO_ID from gh api repos/OWNER/REPO/actions/oidc/customization/sub (.sub_claim_prefix), in infra/platform/oidc-sub-prefixes.auto.tfvars.json."
+    }
+  }
+}
+resource "aws_iam_role_policy_attachment" "infra_admin" {
+  for_each   = var.allowed_repos
+  role       = aws_iam_role.infra[each.key].name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+resource "aws_iam_role_policy" "infra_guardrail" {
+  for_each = var.allowed_repos
+  role     = aws_iam_role.infra[each.key].id
+  name     = "guardrail"
+  policy   = module.guardrail.json
+}
+resource "aws_iam_role_policy" "infra_instance_types" {
+  for_each = var.allowed_repos
+  role     = aws_iam_role.infra[each.key].id
+  name     = "instance-types"
+  policy   = data.aws_iam_policy_document.instance_types.json
+}
+
+# State isolation: both roles of a repo may touch only that repo's team state and read platform.tfstate
+# (the team stack's terraform_remote_state). The org and recipe state files hold values no PR should read.
+# scripts/bootstrap.sh sets no bucket policy, so this creates one rather than replacing one.
+data "aws_iam_policy_document" "state_bucket" {
+  dynamic "statement" {
+    for_each = var.allowed_repos
+    content {
+      effect = "Deny"
+      principals {
+        type        = "AWS"
+        identifiers = ["*"]
+      }
+      actions = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion"]
+      not_resources = [
+        "arn:aws:s3:::${var.state_bucket}/${local.team_state_key[statement.key]}",
+        "arn:aws:s3:::${var.state_bucket}/platform.tfstate",
+      ]
+      condition {
+        test     = "ArnLike"
+        variable = "aws:PrincipalArn"
+        values = [
+          "arn:aws:iam::${var.member_account_id}:role/xenia-plan-${local.repo_slug[statement.key]}",
+          "arn:aws:iam::${var.member_account_id}:role/xenia-infra-${local.repo_slug[statement.key]}",
+        ]
+      }
+    }
+  }
+  # org.tfstate holds Erik's alert email and phone number (the SNS subscriptions). Teammates have
+  # AdministratorAccess in the member account, so without this they could read it from the bucket.
+  statement {
+    sid    = "MembersNoOrgState"
+    effect = "Deny"
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+    actions   = ["s3:GetObject", "s3:GetObjectVersion"]
+    resources = ["arn:aws:s3:::${var.state_bucket}/org.tfstate"]
+    condition {
+      test     = "ArnLike"
+      variable = "aws:PrincipalArn"
+      values   = ["arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_hackathon-dev_*"]
+    }
+  }
+  statement {
+    sid    = "TeamCiPlatformStateReadOnly"
+    effect = "Deny"
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+    actions   = ["s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion"]
+    resources = ["arn:aws:s3:::${var.state_bucket}/platform.tfstate"]
+    condition {
+      test     = "ArnLike"
+      variable = "aws:PrincipalArn"
+      values = [
+        "arn:aws:iam::${var.member_account_id}:role/xenia-plan-*",
+        "arn:aws:iam::${var.member_account_id}:role/xenia-infra-*",
+      ]
+    }
+  }
+}
+resource "aws_s3_bucket_policy" "state" {
+  bucket = var.state_bucket
+  policy = data.aws_iam_policy_document.state_bucket.json
+}
+```
+
+Append to `infra/platform/variables.tf`:
+
+```hcl
+variable "team_instance_types" {
+  description = <<-EOT
+    EC2 instance types the team's infra role (spec D39) may launch or resize to; every other type is
+    denied for that role only. Default: t4g (arm64, the Docker box's family) and t3 (x86, for images
+    with no arm64 build) from nano to large, plus m7g medium to xlarge for steady CPU. The largest,
+    m7g.xlarge, is about $0.18 an hour in ca-central-1. GPU families, 2xlarge and up, and metal are out.
+  EOT
+  type        = list(string)
+  default = [
+    "t4g.nano", "t4g.micro", "t4g.small", "t4g.medium", "t4g.large",
+    "t3.nano", "t3.micro", "t3.small", "t3.medium", "t3.large",
+    "m7g.medium", "m7g.large", "m7g.xlarge",
+  ]
+}
+```
+
+Append to `infra/platform/outputs.tf`:
+
+```hcl
+output "plan_role_arns" {
+  value     = { for r, role in aws_iam_role.plan : r => role.arn }
+  sensitive = true
+}
+output "infra_role_arns" {
+  value     = { for r, role in aws_iam_role.infra : r => role.arn }
+  sensitive = true
+}
+```
+
+Run: `terraform fmt -recursive infra && make validate`
+Expected: `fmt` may realign whitespace (commit what it writes); `validate infra/platform` and `validate infra/org` print `Success! The configuration is valid.`
+
+Then check the bucket has no policy today, so step 11 creates rather than overwrites one:
+
+```bash
+aws s3api get-bucket-policy --bucket "$(awk -F'"' '/^bucket/ {print $2}' infra/backend.local.hcl)" --profile cohack 2>&1 | head -1
+```
+Expected: `An error occurred (NoSuchBucketPolicy) ...`. If a policy is there, stop and ask Erik: step 11's apply would replace it.
+
+- [ ] **Step 8: Write the team-stack starter `infra/examples/team-stack/`**
+
+`onboard-repo.sh` copies this folder to `infra/team/` in the team repo, once (it never overwrites the team's own).
+
+`infra/examples/team-stack/versions.tf`:
+
+```hcl
+terraform {
+  required_version = "~> 1.5.7"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+  # Partial backend: terraform-plan.yml and terraform-apply.yml pass the bucket, the key
+  # (team-<repo>.tfstate), the region, and the lock table at init.
+  backend "s3" {}
+}
+
+provider "aws" {
+  region = "ca-central-1"
+  default_tags {
+    tags = { stack = "team", repo = var.repo }
+  }
+}
+
+provider "aws" {
+  alias  = "use1"
+  region = "us-east-1"
+  default_tags {
+    tags = { stack = "team", repo = var.repo }
+  }
+}
+```
+
+`infra/examples/team-stack/variables.tf`:
+
+```hcl
+variable "repo" {
+  description = "owner/repo; the workflows set it from GITHUB_REPOSITORY"
+  type        = string
+}
+
+variable "state_bucket" {
+  description = "The kit's state bucket; the workflows set it from the TF_STATE_BUCKET repo variable"
+  type        = string
+}
+```
+
+`infra/examples/team-stack/main.tf`:
+
+```hcl
+# Teammate and agent: the team's own AWS infrastructure. Read README.md in this folder first.
+
+# Kit values (zone name and ID, the apex certificate, the log group) come from the platform stack's outputs.
+data "terraform_remote_state" "platform" {
+  backend = "s3"
+  config = {
+    bucket = var.state_bucket
+    key    = "platform.tfstate"
+    region = "ca-central-1"
+  }
+}
+
+locals {
+  zone_name = data.terraform_remote_state.platform.outputs.zone_name
+}
+
+# Example, commented out: the smallest instance, about half a cent an hour. Uncomment it in a PR to try
+# the path end to end; the later PR that deletes it stops at the destroy-ok gate.
+#
+# data "aws_ssm_parameter" "al2023_arm64" {
+#   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+# }
+#
+# resource "aws_instance" "example" {
+#   ami           = data.aws_ssm_parameter.al2023_arm64.insecure_value
+#   instance_type = "t4g.nano"
+#   metadata_options {
+#     http_tokens = "required"
+#   }
+#   tags = { Name = "team-example" }
+# }
+```
+
+`infra/examples/team-stack/README.md`:
+
+```markdown
+# Team infrastructure (`infra/team/`)
+
+**Kit status: Should tier. Shipped as a template; not proven end to end unless
+`docs/proofs/2026-09-25-team-infra.md` exists in the kit repo.**
+
+Teammate: this folder is the team's own AWS infrastructure, in Terraform. It changes by PR, like code, and
+nobody needs AWS keys for it; agents have none (charter C11). The kit's own infrastructure (account, DNS,
+gateway, boxes) is not here and stays Erik's (C6).
+
+1. Edit the `.tf` files here and open a PR.
+2. The `terraform-plan` bot keeps one comment on the PR up to date: the resource addresses and
+   "N to add, N to change, N to destroy". The plan itself never appears, because the repo is public (P-public).
+3. Merge. `terraform-apply` plans again from `main` and applies. One apply runs at a time.
+4. If the plan deletes or replaces anything, the apply stops and the team channel gets the addresses. Add the
+   `destroy-ok` label to the merged PR, then re-run the stopped run: **Re-run failed jobs** on its page, or
+   `gh run rerun <run-id> --failed`. Anyone may add the label, the author included. It is a speed bump in front
+   of an irreversible action (P-wheel), not an approval. If a later merge changes this folder first, that
+   run's plan includes the earlier deletes and stops on its own PR instead.
+
+What CI enforces:
+
+| Rule | What happens otherwise |
+|---|---|
+| EC2 types: `t4g` and `t3` from `nano` to `large`, `m7g.medium`, `m7g.large`, `m7g.xlarge` | the apply fails with `UnauthorizedOperation` |
+| Instances are launched directly (`aws_instance`); no launch templates, EC2 Fleet, Spot Fleet, or Spot requests | denied: IAM can't check the instance type inside them |
+| Regions: `ca-central-1` (default provider) or `us-east-1` (`provider = aws.use1`) | denied |
+| The kit's deny list: no IAM users or access keys, no purchases, no changes to the kit's roles, zone, certificates, state, or backups | denied |
+| The PR plan can't read `/xenia/*` SSM parameters, Secrets Manager values, or backups | the plan fails and the comment says so |
+
+Agent:
+- Make AWS changes here, never in the console (P-no-clickops). You have no AWS credentials; that's deliberate.
+- Before pushing, run `terraform -chdir=infra/team fmt` and
+  `terraform -chdir=infra/team init -backend=false && terraform -chdir=infra/team validate`.
+- Anything billable gets a `shutdown.d/` entry or a `Shutdown: none needed because …` line (P-off-switch).
+- Read kit values from `data.terraform_remote_state.platform.outputs`. Never put a secret in a variable
+  default or an output; product API keys stay in SSM under `/xenia/app/`, put there by a teammate (C10).
+- Add `destroy-ok` (`gh pr edit <n> --add-label destroy-ok`) only after showing the teammate the delete and
+  replace rows from the plan comment and hearing them approve it in this session. A session running with
+  permissions skipped could add the label unasked. The label is a deliberate speed bump, not a lock: don't.
+- If the plan comment says "failed", open the run it links; the log shows only masked error lines.
+```
+
+Append `examples/team-stack` to the end of the `STACKS :=` line in the kit `Makefile`.
+
+Run: `terraform fmt -check -recursive infra && make validate && scripts/ci/leak-check.sh infra/examples/team-stack`
+Expected: `validate infra/examples/team-stack` then `Success!`; the leak check prints nothing.
+
+- [ ] **Step 9: Write `templates/workflows/terraform-plan.yml`**
+
+Every `uses:` line is copied from `.github/workflows/check.yml` and `.github/workflows/oidc-probe.yml` (already pinned); no new action, so `pinact` has nothing to do. The comment is posted with the runner's `gh`.
+
+```yaml
+# terraform-plan (Should tier, spec D39; shipped as a template, not proven end to end unless
+# docs/proofs/2026-09-25-team-infra.md exists in the kit). On a same-repo PR that touches the team's
+# Terraform folder, plan it with the read-only plan role and keep ONE comment on the PR up to date:
+# resource addresses and add/change/destroy counts, never the plan body. The plan job holds OIDC and no
+# write token; the comment job holds the write token and the webhook secret, no OIDC, and runs the base
+# branch's copy of the kit scripts. Fork PRs are skipped. If the stack lives somewhere other than
+# infra/team, change TF_DIR and the paths filter together.
+name: terraform-plan
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "infra/team/**"
+      - ".github/workflows/terraform-plan.yml"
+permissions: {}
+concurrency:
+  group: terraform-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+env:
+  TF_DIR: infra/team
+  AWS_REGION: ${{ vars.AWS_REGION || 'ca-central-1' }}
+jobs:
+  plan:
+    name: plan
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      summary: ${{ steps.plan.outputs.summary }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.5.7
+          terraform_wrapper: false
+      - name: mask the account id
+        env:
+          ROLE_ARN: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+        run: |
+          echo "::add-mask::$(printf '%s' "$ROLE_ARN" | cut -d: -f5)"
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: plan (the plan body stays off the log)
+        id: plan
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+          TF_VAR_repo: ${{ github.repository }}
+          TF_IN_AUTOMATION: "1"
+        run: |
+          mask() { sed -E 's/[0-9]{12}/<account-id>/g'; }
+          log="$RUNNER_TEMP/terraform.log"
+          errors() { { grep -E '^(│|Error)' "$log" || tail -20 "$log"; } | mask | head -60; exit 1; }
+          key="team-${GITHUB_REPOSITORY#*/}.tfstate"
+          terraform -chdir="$TF_DIR" init -input=false -no-color \
+            -backend-config="bucket=$TF_STATE_BUCKET" -backend-config="key=$key" \
+            -backend-config="region=ca-central-1" -backend-config="dynamodb_table=xenia-tflock" \
+            -backend-config="encrypt=true" > "$log" 2>&1 || errors
+          terraform -chdir="$TF_DIR" plan -input=false -no-color -lock=false -out="$RUNNER_TEMP/tfplan" > "$log" 2>&1 || errors
+          terraform -chdir="$TF_DIR" show -json "$RUNNER_TEMP/tfplan" > "$RUNNER_TEMP/plan.json"
+          summary="$(.github/kit/plan-gate.sh summarize "$RUNNER_TEMP/plan.json")"
+          rm -f "$RUNNER_TEMP/plan.json" "$RUNNER_TEMP/tfplan" "$log"
+          jq -r '"plan: \(.add) to add, \(.change) to change, \(.destroy) to destroy", (.changes[] | "  \(.action) \(.address)")' <<< "$summary"
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+      - name: remove the plan files
+        if: always()
+        run: rm -f "$RUNNER_TEMP/plan.json" "$RUNNER_TEMP/tfplan" "$RUNNER_TEMP/terraform.log"
+  comment:
+    name: comment
+    needs: plan
+    if: always() && needs.plan.result != 'skipped' && needs.plan.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: post or update the one plan comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUMMARY: ${{ needs.plan.outputs.summary }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          kit=.github/kit
+          if [ ! -x "$kit/plan-gate.sh" ]; then echo "the base branch has no $kit/plan-gate.sh yet; no comment"; exit 0; fi
+          sum="$RUNNER_TEMP/summary.json"
+          body="$RUNNER_TEMP/body.md"
+          printf '%s' "$SUMMARY" > "$sum"
+          "$kit/plan-gate.sh" comment "$sum" "$RUN_URL" > "$body"
+          marker='<!-- xenia-terraform-plan -->'
+          notified='<!-- xenia-discord-notified -->'
+          id="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -1)"
+          told=no
+          if [ -n "$id" ] && gh api "repos/$GITHUB_REPOSITORY/issues/comments/$id" --jq .body | grep -qF "$notified"; then told=yes; fi
+          # P-comms: the first plan on this PR that deletes or replaces something is posted to the team channel, once.
+          if [ "$told" = no ] && [ -s "$sum" ] && "$kit/plan-gate.sh" has-destroys "$sum"; then
+            out="$("$kit/plan-notify.sh" post pr-plan "$sum" "$PR_URL" "$RUN_URL" || true)"
+            echo "$out"
+            case "$out" in *"posted pr-plan"*) told=yes ;; esac
+          fi
+          if [ "$told" = yes ]; then printf '\n%s\n' "$notified" >> "$body"; fi
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F "body=@$body" > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F "body=@$body" > /dev/null
+          fi
+          echo "plan comment updated on PR $PR_NUMBER"
+```
+
+If GitHub ever drops the `summary` output with "Skip output 'summary' since it may contain secret", the comment says the plan failed: the summary held a value GitHub masks. `plan-gate.sh` already masks 12-digit numbers, so look for another masked value in a resource address.
+
+- [ ] **Step 10: Write `templates/workflows/terraform-apply.yml`**
+
+```yaml
+# terraform-apply (Should tier, spec D39; shipped as a template, not proven end to end unless
+# docs/proofs/2026-09-25-team-infra.md exists in the kit). On a push to main that touches the team's
+# Terraform folder: plan with the infra role, stop if anything is deleted or replaced unless the merged PR
+# carries destroy-ok, otherwise apply the saved plan. The infra role trusts only this file on main.
+# The log shows counts, addresses, progress, and error lines, masked; the plan body and Terraform outputs
+# are never printed. One apply at a time. After adding destroy-ok, re-run the stopped run:
+# gh run rerun <run-id> --failed. The notify job posts to the team channel and holds no OIDC.
+name: terraform-apply
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/team/**"
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: terraform-apply
+  cancel-in-progress: false
+env:
+  TF_DIR: infra/team
+  AWS_REGION: ${{ vars.AWS_REGION || 'ca-central-1' }}
+jobs:
+  apply:
+    name: apply
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: read
+    outputs:
+      gate: ${{ steps.gate.outputs.gate }}
+      destroys: ${{ steps.plan.outputs.destroys }}
+      applied: ${{ steps.apply.outputs.applied }}
+      summary: ${{ steps.plan.outputs.summary }}
+      pr_url: ${{ steps.pr.outputs.url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: stop if main has a newer change to the stack than this run's commit
+        run: |
+          if ! git diff --quiet "$GITHUB_SHA" origin/main -- "$TF_DIR"; then
+            echo "::error::main has a newer change under $TF_DIR; the run for that commit applies it. Re-run the newest terraform-apply run instead."
+            exit 1
+          fi
+      - name: find the merged PR and its labels
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.merged_at != null)][0] // empty | {url: .html_url, labels: [.labels[].name]}')"
+          if [ -z "$pr" ]; then
+            : > "$RUNNER_TEMP/labels.txt"
+            echo "no merged PR for this commit: a delete or replace stops the apply"
+          else
+            jq -r '.labels[]' <<< "$pr" > "$RUNNER_TEMP/labels.txt"
+            url="$(jq -r .url <<< "$pr")"
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+            echo "PR $url, labels: $(paste -sd, "$RUNNER_TEMP/labels.txt")"
+          fi
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.5.7
+          terraform_wrapper: false
+      - name: mask the account id
+        env:
+          ROLE_ARN: ${{ secrets.AWS_INFRA_ROLE_ARN }}
+        run: |
+          echo "::add-mask::$(printf '%s' "$ROLE_ARN" | cut -d: -f5)"
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_INFRA_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: plan (the plan body stays off the log)
+        id: plan
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+          TF_VAR_repo: ${{ github.repository }}
+          TF_IN_AUTOMATION: "1"
+        run: |
+          mask() { sed -E 's/[0-9]{12}/<account-id>/g'; }
+          log="$RUNNER_TEMP/terraform.log"
+          errors() { { grep -E '^(│|Error)' "$log" || tail -20 "$log"; } | mask | head -60; exit 1; }
+          key="team-${GITHUB_REPOSITORY#*/}.tfstate"
+          terraform -chdir="$TF_DIR" init -input=false -no-color \
+            -backend-config="bucket=$TF_STATE_BUCKET" -backend-config="key=$key" \
+            -backend-config="region=ca-central-1" -backend-config="dynamodb_table=xenia-tflock" \
+            -backend-config="encrypt=true" > "$log" 2>&1 || errors
+          terraform -chdir="$TF_DIR" plan -input=false -no-color -lock-timeout=5m -out="$RUNNER_TEMP/tfplan" > "$log" 2>&1 || errors
+          terraform -chdir="$TF_DIR" show -json "$RUNNER_TEMP/tfplan" > "$RUNNER_TEMP/plan.json"
+          .github/kit/plan-gate.sh summarize "$RUNNER_TEMP/plan.json" > "$RUNNER_TEMP/summary.json"
+          rm -f "$RUNNER_TEMP/plan.json"
+          jq -r '"plan: \(.add) to add, \(.change) to change, \(.destroy) to destroy", (.changes[] | "  \(.action) \(.address)")' "$RUNNER_TEMP/summary.json"
+          echo "summary=$(cat "$RUNNER_TEMP/summary.json")" >> "$GITHUB_OUTPUT"
+          if .github/kit/plan-gate.sh has-destroys "$RUNNER_TEMP/summary.json"; then d=true; else d=false; fi
+          echo "destroys=$d" >> "$GITHUB_OUTPUT"
+      - name: gate (deletes and replaces need destroy-ok on the merged PR)
+        id: gate
+        run: |
+          mapfile -t labels < "$RUNNER_TEMP/labels.txt"
+          rc=0
+          .github/kit/plan-gate.sh gate "$RUNNER_TEMP/summary.json" "${labels[@]}" || rc=$?
+          case "$rc" in
+            0) echo "gate=pass" >> "$GITHUB_OUTPUT" ;;
+            3) echo "gate=paused" >> "$GITHUB_OUTPUT"
+               echo "::error::apply stopped: add the destroy-ok label to the merged PR, then re-run this run (gh run rerun $GITHUB_RUN_ID --failed)"
+               exit 1 ;;
+            *) exit "$rc" ;;
+          esac
+      - name: apply the saved plan
+        id: apply
+        env:
+          TF_IN_AUTOMATION: "1"
+        run: |
+          mask() { sed -E 's/[0-9]{12}/<account-id>/g'; }
+          if [ "$(jq '.add + .change + .destroy' "$RUNNER_TEMP/summary.json")" = 0 ]; then echo "nothing to apply"; exit 0; fi
+          log="$RUNNER_TEMP/terraform.log"
+          rc=0
+          terraform -chdir="$TF_DIR" apply -input=false -no-color -lock-timeout=5m "$RUNNER_TEMP/tfplan" > "$log" 2>&1 || rc=$?
+          # Progress and error lines only: the Outputs block and attribute values never reach the log.
+          { grep -E ': (Creation|Modifications|Destruction) complete|^Apply complete|^(│|Error)' "$log" || true; } | mask
+          [ "$rc" -eq 0 ] || exit "$rc"
+          echo "applied=true" >> "$GITHUB_OUTPUT"
+      - name: remove the plan files
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tfplan" "$RUNNER_TEMP/plan.json" "$RUNNER_TEMP/terraform.log"
+  notify:
+    name: notify
+    needs: apply
+    if: always() && (needs.apply.outputs.gate == 'paused' || (needs.apply.outputs.applied == 'true' && needs.apply.outputs.destroys == 'true'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: tell the team channel (P-comms)
+        env:
+          KIND: ${{ needs.apply.outputs.gate == 'paused' && 'paused' || 'applied' }}
+          SUMMARY: ${{ needs.apply.outputs.summary }}
+          PR_URL: ${{ needs.apply.outputs.pr_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          printf '%s' "$SUMMARY" > "$RUNNER_TEMP/summary.json"
+          .github/kit/plan-notify.sh post "$KIND" "$RUNNER_TEMP/summary.json" "$PR_URL" "$RUN_URL"
+```
+
+`gh run rerun --failed` re-runs the failed `apply` job and the `notify` job that depends on it, so the re-run's completion post goes out on its own.
+
+Run:
+```bash
+actionlint templates/workflows/terraform-plan.yml templates/workflows/terraform-apply.yml
+zizmor --min-severity medium --persona regular templates/workflows/terraform-plan.yml templates/workflows/terraform-apply.yml
+grep -h 'uses:' templates/workflows/terraform-*.yml | sort -u
+```
+Expected: no findings from either linter; exactly three distinct `uses:` lines, each byte-identical to the ones in `.github/workflows/check.yml` and `.github/workflows/oidc-probe.yml`. If zizmor reports a finding, fix the workflow rather than suppressing it, unless it is the documented `pull_request` + OIDC pattern this spec accepts (D35), in which case add an inline `# zizmor: ignore[<rule>]` with the reason.
+
+- [ ] **Step 11: Team-repo template edits and `onboard-repo.sh` additions**
+
+`templates/team-repo/labels.json` gains `destroy-ok` (idempotent edit):
+
+```bash
+tmp="$(mktemp)"
+jq 'if any(.[]; .name == "destroy-ok") then . else . + [{"name": "destroy-ok", "color": "B60205", "description": "Lets terraform-apply delete or replace team infrastructure for this merged PR"}] end' \
+  templates/team-repo/labels.json > "$tmp" && mv "$tmp" templates/team-repo/labels.json
+```
+
+Append one line to `templates/team-repo/CLAUDE.md`:
+
+```markdown
+- Agent: AWS changes go through `infra/team/` by PR, never the console; read `infra/team/README.md` first. Add `destroy-ok` to a PR only after the teammate approves the listed deletes in this session.
+```
+
+Append to the **P-wheel** entry in `team-kit/PRINCIPLES-EXTENDED.md` (spec §13, **P-wheel/destroy**), then run `make sync-plugin` so the bundled copy matches:
+
+```markdown
+Deleting or replacing team infrastructure is an irreversible action, so the apply after merge pauses on it until a teammate adds `destroy-ok` to the merged PR. Agent: add `destroy-ok` (`gh pr edit <n> --add-label destroy-ok`) only after showing the teammate the delete and replace addresses from the plan comment and hearing them approve it in this session. An agent running with permissions skipped could add the label unasked; the label is a deliberate speed bump, not a lock (**P-wheel/destroy**).
+```
+
+`scripts/onboard-repo.sh` (Task 17's file; each edit is anchored on a line quoted from it):
+
+a. Step 1, after the `gh api -X PUT "repos/$repo/actions/oidc/customization/sub"` call. Skip (a) and (b) if Task 17 already has them (its pointer asks for them):
+
+```bash
+sub_prefix="$(gh api "repos/$repo/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty')"
+[[ -n "$sub_prefix" ]] || die "GitHub returned no sub_claim_prefix for $repo; the platform roles can't trust it without one"
+log "OIDC subject prefix: $sub_prefix"
+```
+
+b. Step 2, before `"$KIT_ROOT/scripts/tf.sh" platform apply` (same condition), and add the file to the `git -C "$KIT_ROOT" add` line:
+
+```bash
+oidc_sub_prefix_set "$KIT_ROOT/infra/platform/oidc-sub-prefixes.auto.tfvars.json" "$repo" "$sub_prefix"
+```
+```bash
+git -C "$KIT_ROOT" add infra/platform/allowed-repos.auto.tfvars.json infra/platform/oidc-sub-prefixes.auto.tfvars.json plugin/allowed-repos.txt plugin/bundled/PRINCIPLES.md
+```
+
+c. Step 3: the workflow loop gains the two templates:
+
+```bash
+for wf in check shutdown-coverage render-shutdown-md pr-review deploy-docker-box preview-up preview-down devcontainer-image terraform-plan terraform-apply; do
+```
+
+and after the `sed -i.bak "s|@OWNER1 @OWNER2|$owners_space|g" CODEOWNERS` line (CODEOWNERS is re-copied on every run, so the append is idempotent):
+
+```bash
+mkdir -p .github/kit
+cp "$KIT_ROOT/scripts/ci/plan-gate.sh" "$KIT_ROOT/scripts/ci/plan-notify.sh" .github/kit/
+# No code-owner line for .github/kit/: it's workflow-adjacent (the destroy gate scripts), and the
+# owned set is the rules files only (Erik's decision, 2026-09-24) — it self-merges like the rest
+# of .github/workflows/.
+if [[ ! -d infra/team ]]; then
+  mkdir -p infra && cp -R "$KIT_ROOT/infra/examples/team-stack" infra/team
+  rm -rf infra/team/.terraform infra/team/.terraform-validate   # the kit's local `make validate` leftovers
+fi
+```
+
+d. Step 8, after the `ECR_REGISTRY` line:
+
+```bash
+v="$(tfout plan_role_arns)"; [[ -n "$v" ]] || die "no plan role for $repo in the platform outputs (Task 30's apply)"
+printf '%s' "$v" | gh secret set AWS_PLAN_ROLE_ARN --repo "$repo"
+v="$(tfout infra_role_arns)"; printf '%s' "$v" | gh secret set AWS_INFRA_ROLE_ARN --repo "$repo"
+unset v
+state_bucket="$(awk -F'"' '/^bucket/ {print $2}' "$KIT_ROOT/infra/backend.local.hcl")"
+[[ -n "$state_bucket" ]] || die "no bucket in infra/backend.local.hcl"
+gh variable set TF_STATE_BUCKET --body "$state_bucket" --repo "$repo"
+```
+
+e. Step 10's follow-up list gains a line:
+
+```bash
+6. Team infrastructure: agents change AWS by PR under infra/team/ (README there); merges apply; deletes wait for destroy-ok.
+```
+
+(renumber the `--private` note to 7).
+
+Run: `bash -n scripts/onboard-repo.sh && shellcheck -x scripts/onboard-repo.sh && bats tests/ && make check`
+Expected: no shellcheck findings beyond the SC1091 info Task 17 already accepts; every bats file passes; `make check: OK`.
+
+- [ ] **Step 12: Commit, then STOP: Erik approves the platform and org applies**
+
+```bash
+git add infra/platform/team-ci.tf infra/platform/variables.tf infra/platform/outputs.tf infra/modules/guardrail-policy/main.tf \
+  infra/examples/team-stack scripts/ci/plan-gate.sh scripts/ci/plan-notify.sh scripts/lib/allowed-repos.sh scripts/onboard-repo.sh \
+  tests/plan-gate.bats tests/plan-notify.bats tests/oidc-sub-prefix.bats tests/fixtures/plan \
+  templates/workflows/terraform-plan.yml templates/workflows/terraform-apply.yml templates/team-repo team-kit/PRINCIPLES-EXTENDED.md plugin Makefile
+git commit -m "Add team infrastructure by PR: plan and infra roles, plan comment, destroy-ok gate, apply on merge"
+```
+
+Then show Erik both plans and wait for him to type `yes` to each (never `-auto-approve`):
+
+```bash
+scripts/tf.sh platform apply
+scripts/tf.sh org apply
+```
+Expected, platform, with N repos in `allowed_repos`: `8N + 1 to add` (per repo: two roles, two managed-policy attachments, four inline policies; plus the state bucket policy) and `N to change` (each deploy role's `guardrail` policy gains the two role patterns); `0 to destroy`. Org: `0 to add, 1 to change, 0 to destroy` (the `hackathon-dev` inline deny, same module). Anything else in either plan: stop and show Erik before typing anything.
+
+Check the new policies with the IAM simulator (it evaluates the role's identity policies with the context given; it prints only the action and the decision):
+
+```bash
+source kit.local.env
+repo=ert485/xenia-test-team
+infra_arn="$(TF_NO_MASK=1 scripts/tf.sh platform output -json infra_role_arns | jq -r --arg r "$repo" '.[$r]')"
+plan_arn="$(TF_NO_MASK=1 scripts/tf.sh platform output -json plan_role_arns | jq -r --arg r "$repo" '.[$r]')"
+inst="arn:aws:ec2:ca-central-1:$MEMBER_ACCOUNT_ID:instance/*"
+sim() { aws iam simulate-principal-policy --profile cohack --query 'EvaluationResults[].[EvalActionName,EvalDecision]' --output text "$@"; }
+sim --policy-source-arn "$infra_arn" --action-names ec2:RunInstances --resource-arns "$inst" \
+  --context-entries ContextKeyName=ec2:InstanceType,ContextKeyValues=t4g.nano,ContextKeyType=string
+sim --policy-source-arn "$infra_arn" --action-names ec2:RunInstances --resource-arns "$inst" \
+  --context-entries ContextKeyName=ec2:InstanceType,ContextKeyValues=m7i.8xlarge,ContextKeyType=string
+sim --policy-source-arn "$infra_arn" --action-names ec2:ModifyInstanceAttribute --resource-arns "$inst" \
+  --context-entries ContextKeyName=ec2:Attribute/InstanceType,ContextKeyValues=m7i.8xlarge,ContextKeyType=string
+sim --policy-source-arn "$infra_arn" --action-names ec2:ModifyInstanceAttribute --resource-arns "$inst"
+sim --policy-source-arn "$infra_arn" --action-names ec2:CreateLaunchTemplate
+sim --policy-source-arn "$infra_arn" --action-names iam:PutRolePolicy \
+  --resource-arns "arn:aws:iam::$MEMBER_ACCOUNT_ID:role/xenia-infra-ert485-xenia-test-team"
+sim --policy-source-arn "$plan_arn" --action-names ssm:GetParameter \
+  --resource-arns "arn:aws:ssm:ca-central-1:$MEMBER_ACCOUNT_ID:parameter/xenia/gateway/master-key"
+unset infra_arn plan_arn inst
+```
+Expected, in order: `ec2:RunInstances allowed`; `ec2:RunInstances explicitDeny`; `ec2:ModifyInstanceAttribute explicitDeny`; `ec2:ModifyInstanceAttribute allowed` (no type in the call); `ec2:CreateLaunchTemplate explicitDeny`; `iam:PutRolePolicy explicitDeny`; `ssm:GetParameter explicitDeny`. If the simulator rejects `ec2:Attribute/InstanceType` as an unknown context key, record it, and let step 13's resize check decide: if a real resize to a denied type succeeds, the key is not populated and the resize statement is dead, so tell Erik (the fallback is denying `ec2:ModifyInstanceAttribute` whenever the instance is stopped, which is how Terraform resizes, at the cost of other stopped-instance edits).
+
+Push the branch and merge it by PR the same day (the kit's `main` must carry the new roles, or the next apply from `main` would delete them):
+
+```bash
+git push -u origin should/team-infra
+gh pr create --title "Should tier: team infrastructure by PR, applied on merge" --body "$(printf 'Two per-repo roles (read-only plan, infra with the deny list and an EC2 instance-type allow-list), a state-bucket policy that keeps them to their own state, terraform-plan.yml (one comment with addresses and counts, never the plan body) and terraform-apply.yml (apply on merge, deletes and replaces wait for the destroy-ok label, posts to the team channel), the team-stack starter, and the onboard-repo.sh additions.\n\nRule-feedback: none\nShutdown: none needed because this adds IAM roles, a bucket policy, templates, and workflows, none billable\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
+gh pr checks --watch && gh pr merge --squash --delete-branch
+```
+(Branch first if you are not on it: `git checkout -b should/team-infra` before the commit above.)
+
+- [ ] **Step 13: Prove it in the throwaway team repo (Should tier; only if Friday allows)**
+
+Uses `ert485/xenia-test-team` from Task 17 (kept until Sunday). Needs `DISCORD_WEBHOOK_URL` in `kit.local.env`; without it the Discord checks read `skipping the team-channel post` and the proof is recorded as partial.
+
+```bash
+scripts/onboard-repo.sh ert485/xenia-test-team --owners @ert485
+```
+Expected: the apply shows `No changes` (step 12 created the roles); step 3 pushes a `kit-sync-*` branch (the ruleset exists by now): open and merge its PR (it touches `.github/workflows/`, but `CODEOWNERS` owns only the rules files now, so it self-merges with no ruleset toggle), which adds `.github/workflows/terraform-{plan,apply}.yml`, `.github/kit/`, and `infra/team/`; step 8 sets `AWS_PLAN_ROLE_ARN`, `AWS_INFRA_ROLE_ARN`, and `TF_STATE_BUCKET`. That merge touches `infra/team/**`, so `terraform-apply` runs once: expected `plan: 0 to add, 0 to change, 0 to destroy`, `gate: no deletes or replaces`, `nothing to apply`.
+
+a. **Add a tagged `t4g.nano`.**
+
+```bash
+cd "$(mktemp -d)" && gh repo clone ert485/xenia-test-team . -- -q
+git switch -c add-probe
+cat >> infra/team/main.tf <<'EOF'
+
+data "aws_ssm_parameter" "al2023_arm64" {
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+}
+
+resource "aws_instance" "probe" {
+  ami           = data.aws_ssm_parameter.al2023_arm64.insecure_value
+  instance_type = "t4g.nano"
+  metadata_options {
+    http_tokens = "required"
+  }
+  tags = { Name = "team-infra-probe" }
+}
+EOF
+git commit -qam "Add a t4g.nano probe (team infra proof)" && git push -q -u origin add-probe
+gh pr create --title "Team infra proof: add a t4g.nano" --body "$(printf 'Proves plan comment and apply on merge.\n\nRule-feedback: none\nShutdown: none needed because the next proof PR removes it\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
+gh pr checks --watch
+gh pr view --json comments --jq '.comments[] | select(.body | startswith("<!-- xenia-terraform-plan -->")) | .body'
+```
+Expected: exactly one plan comment reading `**1 to add, 0 to change, 0 to destroy.**` with one table row, action `create`, address `aws_instance.probe`; no `t4g.nano` and no AMI ID anywhere in it; no Discord post. Push an empty commit (`git commit --allow-empty -qm retrigger && git push -q`) and check the comment count is still one. Then `gh pr merge --squash --delete-branch` and `gh run watch "$(gh run list --workflow terraform-apply.yml -L 1 --json databaseId --jq '.[0].databaseId')"`: the apply log shows `plan: 1 to add`, `gate: no deletes or replaces`, `aws_instance.probe: Creation complete`, `Apply complete! Resources: 1 added`, and no `Outputs:` block and no 12-digit number. Confirm from Erik's machine that the instance exists and carries the team default tags:
+
+```bash
+aws ec2 describe-instances --profile cohack \
+  --filters Name=tag:Name,Values=team-infra-probe Name=tag:stack,Values=team Name=instance-state-name,Values=running \
+  --query 'Reservations[].Instances[].InstanceType' --output text
+```
+Expected: `t4g.nano`.
+
+b. **Remove it: the gate pauses and tells Discord.**
+
+```bash
+git switch main && git pull -q && git switch -c remove-probe
+python3 - infra/team/main.tf <<'PY'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s = re.sub(r'\ndata "aws_ssm_parameter" "al2023_arm64" \{.*\Z', '\n', s, flags=re.S)
+open(p, "w").write(s)
+PY
+git commit -qam "Remove the probe (team infra proof)" && git push -q -u origin remove-probe
+gh pr create --title "Team infra proof: remove the t4g.nano" --body "$(printf 'Proves the destroy-ok gate.\n\nRule-feedback: none\nShutdown: none needed because this removes the only billable thing it added\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
+gh pr checks --watch
+```
+Expected: the plan comment reads `0 to add, 0 to change, 1 to destroy`, carries the destroy-ok note and the `Agent:` line; Discord shows one `Terraform plan on a PR in ert485/xenia-test-team deletes or replaces 1 resource(s).` message. Push an empty commit: still one comment and no second Discord message. Merge. Expected: the `apply` job fails at the gate with `gate: stopped: 1 delete(s) or replace(s)` and `delete aws_instance.probe`; Discord shows `Terraform apply paused in ert485/xenia-test-team ...` with the PR link and `Add the destroy-ok label to the PR to proceed`; the instance is still running. Then:
+
+```bash
+gh pr edit <the remove PR number> --add-label destroy-ok
+gh run rerun "$(gh run list --workflow terraform-apply.yml -L 1 --json databaseId --jq '.[0].databaseId')" --failed
+```
+Expected: the re-run logs `gate: destroy-ok is on the merged PR`, `Destruction complete`, `Apply complete! Resources: 0 added, 0 changed, 1 destroyed.`; Discord shows `Terraform apply finished in ert485/xenia-test-team and deleted or replaced 1 resource(s).`; the `describe-instances` command above prints nothing.
+
+c. **An `m7i.8xlarge` is denied.** Repeat (a) with `instance_type = "m7i.8xlarge"` and resource name `too_big`. Expected: the plan comment shows `1 to add` (planning needs no permission to launch); after merge the apply fails with an error line containing `UnauthorizedOperation` for `aws_instance.too_big`, and no instance exists (`aws ec2 describe-instances --profile cohack --filters Name=instance-type,Values=m7i.8xlarge --query 'Reservations[].Instances[].InstanceId' --output text` prints nothing). Clean up with a PR that deletes the block: its plan shows `0 to add, 0 to change, 0 to destroy` because nothing was created.
+
+d. **Resize is denied (checks `ec2:Attribute/InstanceType`).** Optional, about ten minutes: re-add the `t4g.nano` probe as in (a), then a PR changing only `instance_type` to `m7i.8xlarge`. Expected: the plan shows `1 to change`; the apply stops the instance and then fails on `ModifyInstanceAttribute` with `UnauthorizedOperation`. Remove the probe as in (b) afterwards. If the resize succeeds instead, stop, resize back by PR at once, and tell Erik (step 12's fallback).
+
+e. **The PR plan can't read another stack's state.** Optional: a PR adding `data "aws_s3_object" "org" { bucket = var.state_bucket, key = "org.tfstate" }` gets a comment titled `failed`, and the run log shows an `AccessDenied` error line, masked. Close it unmerged.
+
+- [ ] **Step 14: Record the proof and commit**
+
+Write `docs/proofs/2026-09-25-team-infra.md` with the time, the PR URLs, the plan-comment text of (a) and (b), the three Discord message texts, the gate and apply log lines, the `UnauthorizedOperation` line from (c), the simulator results from step 12, and anything skipped with its reason. Then:
+
+```bash
+scripts/ci/leak-check.sh docs/proofs/2026-09-25-team-infra.md
+git checkout main && git pull --ff-only && git checkout -b should/team-infra-proof
+git add docs/proofs/2026-09-25-team-infra.md
+git commit -m "Record the team-infrastructure proof: plan comment, apply on merge, destroy-ok gate, instance-type deny"
+git push -u origin should/team-infra-proof
+gh pr create --title "Team infrastructure proof record" --body "$(printf 'Proof record for team infrastructure by PR.\n\nRule-feedback: none\nShutdown: none needed because this adds a document\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
+gh pr checks --watch && gh pr merge --squash --delete-branch
+```
+Expected: the leak check prints nothing; `check` and `shutdown-coverage` green; merged. If Friday ran out before step 13, skip this step: the templates already say the tier is not proven.
 
 # Phase 3: Cut tier (documented only)
 
