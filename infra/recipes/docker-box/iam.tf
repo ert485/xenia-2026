@@ -44,7 +44,10 @@ data "aws_iam_policy_document" "box" {
     actions   = ["route53:ListHostedZones", "route53:ListHostedZonesByName", "route53:GetChange"]
     resources = ["*"]
   }
-  # DNS-01 only: the box may change _acme-challenge records in the kit zone and nothing else (spec section 6).
+  # DNS-01 only: the box may change _acme-challenge TXT records in the kit zone and nothing else
+  # (spec section 6). Both conditions apply (a statement's conditions are ANDed): the record name
+  # must match _acme-challenge.* AND its type must be TXT, so an A/CNAME/etc. under that name, or a
+  # differently-named TXT record, is denied.
   statement {
     sid       = "AcmeChallengeRecordsOnly"
     actions   = ["route53:ChangeResourceRecordSets"]
@@ -53,6 +56,11 @@ data "aws_iam_policy_document" "box" {
       test     = "ForAllValues:StringLike"
       variable = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
       values   = ["_acme-challenge.*"]
+    }
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "route53:ChangeResourceRecordSetsRecordTypes"
+      values   = ["TXT"]
     }
   }
   statement {

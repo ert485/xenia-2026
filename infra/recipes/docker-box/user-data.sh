@@ -43,13 +43,37 @@ docker network inspect gateway >/dev/null 2>&1 || docker network create --opt co
 docker network inspect edge >/dev/null 2>&1 || docker network create --opt com.docker.network.bridge.name=edge0 edge
 
 # IMDS guard (deviation 1): only the gateway network may reach the instance metadata service.
+# Docker keeps an existing DOCKER-USER chain's contents across restarts, but the chain itself may
+# not exist yet (a fresh dockerd hasn't created it), so the script always ensures the chain first.
 cat > /usr/local/sbin/xenia-imds-guard.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+iptables -N DOCKER-USER 2>/dev/null || true
 iptables -C DOCKER-USER ! -i gw0 -d 169.254.169.254 -j DROP 2>/dev/null \
   || iptables -I DOCKER-USER ! -i gw0 -d 169.254.169.254 -j DROP
 EOF
 chmod 0755 /usr/local/sbin/xenia-imds-guard.sh
+
+# Runs BEFORE docker starts, on every boot: dockerd restarts containers with restart policies during
+# its own startup, so without this, there is a window on every boot after the first where a container
+# can reach 169.254.169.254 before the guard (below) has a chance to run. This unit installs the same
+# idempotent rule pre-emptively so the chain is already in place the instant docker creates its bridges.
+cat > /etc/systemd/system/xenia-imds-guard-pre.service <<'EOF'
+[Unit]
+Description=xenia: pre-install the metadata-service drop rule before docker starts
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/xenia-imds-guard.sh
+
+[Install]
+WantedBy=docker.service
+EOF
+
+# Re-asserts the same rule after docker (re)starts, in case dockerd's own startup replaced or flushed
+# the DOCKER-USER chain.
 cat > /etc/systemd/system/xenia-imds-guard.service <<'EOF'
 [Unit]
 Description=xenia: drop container traffic to instance metadata except from the gateway network
@@ -66,8 +90,13 @@ ExecStart=/usr/local/sbin/xenia-imds-guard.sh
 WantedBy=multi-user.target
 EOF
 
-mkdir -p /srv/app /srv/previews /run/xenia
-chmod 0700 /run/xenia
+mkdir -p /srv/app /srv/previews
+# /run/xenia is tmpfs (wiped every boot): a tmpfiles.d rule recreates it with the right mode on every
+# boot, including this one via the immediate --create below.
+cat > /etc/tmpfiles.d/xenia.conf <<'EOF'
+d /run/xenia 0700 root root -
+EOF
+systemd-tmpfiles --create /etc/tmpfiles.d/xenia.conf
 
 if [ ! -d /srv/kit/.git ]; then
   git clone --depth 1 --branch "${kit_ref}" "https://github.com/${kit_repo}.git" /srv/kit
@@ -125,9 +154,14 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
+systemctl enable --now xenia-imds-guard-pre.service
 systemctl enable --now xenia-imds-guard.service
 systemctl enable --now xenia-backup.timer
 systemctl enable xenia-gateway.service
 
-# Task 7 adds gateway/compose.yml; before that this only updates the checkout.
-/srv/kit/infra/recipes/docker-box/box/gateway.sh update || true
+# Task 7 adds gateway/compose.yml; before that this only updates the checkout. A failure here must
+# not abort first boot (the rest of provisioning, and later scripts/box.sh update calls, still work),
+# but it must not be silent either.
+if ! /srv/kit/infra/recipes/docker-box/box/gateway.sh update; then
+  echo "WARNING: initial gateway.sh update failed; first boot continues without the gateway started (retry with: scripts/box.sh xenia-gateway Action=update)" >&2
+fi
