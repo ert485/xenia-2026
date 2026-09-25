@@ -2,6 +2,14 @@
 set -euo pipefail  # Exit on error, undefined vars, and pipeline failures
 IFS=$'\n\t'       # Stricter word splitting
 
+# xenia: fail-CLOSED ordering (controller ruling, fix round 1). The default-deny policies go up
+# FIRST -- loopback, established/related, DNS to the container's resolver, and the devcontainer's
+# own host network are the only things allowed before a single allow-list host is resolved. A
+# host that does not resolve yet (a gateway not deployed yet, say) gets a WARNING and is skipped,
+# never an abort that leaves the firewall half-applied. The trap re-asserts the DROP policies on
+# any unexpected error or exit, so a mid-script failure cannot leave egress open.
+trap 'iptables -P INPUT DROP 2>/dev/null || true; iptables -P OUTPUT DROP 2>/dev/null || true; iptables -P FORWARD DROP 2>/dev/null || true' ERR EXIT
+
 # 1. Extract Docker DNS info BEFORE any flushing
 DOCKER_DNS_RULES=$(iptables-save -t nat | grep "127\.0\.0\.11" || true)
 
@@ -24,23 +32,68 @@ else
     echo "No Docker DNS rules to restore"
 fi
 
-# First allow DNS and localhost before any restrictions
-# Allow outbound DNS
+# Baseline, allowed before anything else: outbound DNS, inbound DNS responses, outbound SSH,
+# inbound SSH responses, loopback, and established/related in both directions.
 iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-# Allow inbound DNS responses
 iptables -A INPUT -p udp --sport 53 -j ACCEPT
-# Allow outbound SSH
 iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT
-# Allow inbound SSH responses
 iptables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
-# Allow localhost
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-# Create ipset with CIDR support
+# Host network (the devcontainer's own gateway/subnet): local routing info only, no network call.
+HOST_IP=$(ip route | grep default | cut -d" " -f3)
+if [ -z "$HOST_IP" ]; then
+    echo "ERROR: Failed to detect host IP"
+    exit 1
+fi
+HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
+echo "Host network detected as: $HOST_NETWORK"
+iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
+iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
+
+# The allowed-domains ipset, and the OUTPUT rule that consults it -- created and wired in before
+# it holds anything. Allow-list hosts populate it below, after default-deny is already in force.
 ipset create allowed-domains hash:net
+iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
 
-# Fetch GitHub meta information and aggregate + add their IP ranges
+# Default-deny NOW, before any allow-list host is resolved. From this line on, only loopback,
+# established/related, DNS, the host network, and whatever lands in allowed-domains can get out.
+iptables -P INPUT DROP
+iptables -P FORWARD DROP
+iptables -P OUTPUT DROP
+
+# Explicit REJECT for immediate feedback (icmp) instead of a silent drop on anything the rules
+# above didn't match; the DROP policy is what actually enforces the posture either way.
+iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+
+allow_host() {
+    # Resolve one hostname and add its A records to allowed-domains. A hostname that does not
+    # resolve yet gets a WARNING and is skipped -- never an abort with the firewall half-applied
+    # (a not-yet-deployed gateway host, for example, must not force egress open).
+    domain="$1"
+    echo "Resolving $domain..."
+    ips="$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')"
+    if [ -z "$ips" ]; then
+        echo "WARNING: $domain did not resolve yet; skipping (refresh-firewall.sh adds it once it does)"
+        return 0
+    fi
+    while read -r ip; do
+        if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+            echo "ERROR: Invalid IP from DNS for $domain: $ip"
+            exit 1
+        fi
+        echo "Adding $ip for $domain"
+        ipset add -exist allowed-domains "$ip"
+    done <<< "$ips"
+}
+
+# GitHub's own address first: DNS is already allowed but nothing else is, and api.github.com must
+# be reachable to fetch the full web/api/git ranges below.
+allow_host "api.github.com"
+
 echo "Fetching GitHub IP ranges..."
 gh_ranges=$(curl -s https://api.github.com/meta)
 if [ -z "$gh_ranges" ]; then
@@ -60,12 +113,13 @@ while read -r cidr; do
         exit 1
     fi
     echo "Adding GitHub range $cidr"
-    ipset add allowed-domains "$cidr"
+    ipset add -exist allowed-domains "$cidr"
 done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q)
 
 # Resolve and add other allowed domains
 # xenia: the kit's list (spec section 11). refresh-firewall.sh reads this loop header, so keep one
-# quoted hostname per line.
+# quoted hostname per line. A host that does not resolve yet is a WARNING (see allow_host), not a
+# failure: the gateway, for instance, may not be deployed yet.
 for domain in \
     "registry.npmjs.org" \
     "api.anthropic.com" \
@@ -87,51 +141,8 @@ for domain in \
     "marketplace.visualstudio.com" \
     "vscode.blob.core.windows.net" \
     "update.code.visualstudio.com"; do
-    echo "Resolving $domain..."
-    ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
-    if [ -z "$ips" ]; then
-        echo "ERROR: Failed to resolve $domain"
-        exit 1
-    fi
-
-    while read -r ip; do
-        if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-            echo "ERROR: Invalid IP from DNS for $domain: $ip"
-            exit 1
-        fi
-        echo "Adding $ip for $domain"
-        ipset add -exist allowed-domains "$ip"
-    done < <(echo "$ips")
+    allow_host "$domain"
 done
-
-# Get host IP from default route
-HOST_IP=$(ip route | grep default | cut -d" " -f3)
-if [ -z "$HOST_IP" ]; then
-    echo "ERROR: Failed to detect host IP"
-    exit 1
-fi
-
-HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
-echo "Host network detected as: $HOST_NETWORK"
-
-# Set up remaining iptables rules
-iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
-iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
-
-# Set default policies to DROP first
-iptables -P INPUT DROP
-iptables -P FORWARD DROP
-iptables -P OUTPUT DROP
-
-# First allow established connections for already approved traffic
-iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-
-# Then allow only specific outbound traffic to allowed domains
-iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
-
-# Explicitly REJECT all other outbound traffic for immediate feedback
-iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
 
 echo "Firewall configuration complete"
 echo "Verifying firewall rules..."

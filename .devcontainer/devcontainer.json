@@ -61,6 +61,6 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && (setsid nohup bash -c 'while sleep 900; do sudo /usr/local/bin/refresh-firewall.sh; done' >/tmp/refresh-firewall.log 2>&1 &)",
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh || { echo 'Teammate: the firewall step failed -- stop and run /doctor before doing anything else, do not disable or work around the firewall.'; echo 'Agent: the firewall step failed; stop and run /doctor before continuing any task.'; exit 1; } && (setsid nohup bash -c 'while sleep 900; do sudo /usr/local/bin/refresh-firewall.sh; done' >/tmp/refresh-firewall.log 2>&1 &)",
   "waitFor": "postStartCommand"
 }
