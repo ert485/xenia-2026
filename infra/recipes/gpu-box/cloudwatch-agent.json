@@ -1,0 +1,23 @@
+{
+  "agent": {
+    "metrics_collection_interval": 60
+  },
+  "metrics": {
+    "namespace": "xenia/gpu",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "metrics_collected": {
+      "nvidia_gpu": {
+        "measurement": [
+          "utilization_gpu",
+          "utilization_memory",
+          "memory_used",
+          "memory_total",
+          "temperature_gpu"
+        ],
+        "metrics_collection_interval": 60
+      }
+    }
+  }
+}

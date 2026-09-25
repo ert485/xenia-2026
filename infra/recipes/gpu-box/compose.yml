@@ -1,0 +1,46 @@
+# vLLM on the GPU box (compose project "vllm"). The bearer token is VLLM_API_KEY in the environment,
+# never on the command line. The model settings come from /etc/xenia/vllm.env (written at first boot,
+# rewritten by scripts/gpu.sh model); bash -c expands them inside the container ($$ is a literal $).
+name: vllm
+
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.30.0
+    restart: unless-stopped
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    env_file:
+      - /etc/xenia/vllm.env
+    environment:
+      HF_HOME: /data/hf
+    volumes:
+      - /data/hf:/data/hf
+      - /etc/xenia/tls:/tls:ro
+    ports:
+      - "8443:8443"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        exec vllm serve "$$MODEL_REPO"
+        --served-model-name qwen3-coder
+        --max-model-len 131072
+        --kv-cache-dtype fp8
+        --gpu-memory-utilization 0.92
+        --enable-auto-tool-choice
+        --tool-call-parser "$$TOOL_PARSER"
+        --max-num-seqs "$$MAX_NUM_SEQS"
+        --host 0.0.0.0 --port 8443
+        --ssl-keyfile /tls/key.pem --ssl-certfile /tls/cert.pem
+        $$EXTRA_ARGS
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import ssl, urllib.request; urllib.request.urlopen('https://localhost:8443/health', context=ssl._create_unverified_context(), timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 900s

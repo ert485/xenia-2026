@@ -1,0 +1,29 @@
+# Models the GPU box can serve. Clients always ask for qwen3-coder (served_name never changes), so a
+# switch is invisible to them: scripts/gpu.sh model <name>. Parser names per current vLLM docs:
+# qwen3_xml first, qwen3_coder is the older name (test both); openai for gpt-oss.
+default: qwen3-coder-awq
+models:
+  qwen3-coder-awq:
+    # INT4: ~17 GB of weights, ~24 GB of KV cache, about 500k aggregate tokens (spec section 10).
+    # Chosen 2026-09-24 (Task 10 step 1): most-downloaded AWQ build updated in 2026, apache-2.0,
+    # not gated. cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit (the brief's candidate) now
+    # redirects (HTTP 307) to this repo id -- same weights, renamed owner account.
+    repo: cyankiwi/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit  # rev 4bd30395b72ea6045edd04806c4fea448d4467b3
+    served_name: qwen3-coder
+    tool_parser: qwen3_xml
+    max_num_seqs: 8
+    extra_args: ""
+  qwen3-coder-fp8:
+    # Official FP8: better quality, ~10 GB of cache, about 200k aggregate tokens.
+    repo: Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+    served_name: qwen3-coder
+    tool_parser: qwen3_xml
+    max_num_seqs: 4
+    extra_args: ""
+  gpt-oss-20b:
+    # MXFP4, ~13 GB: the fallback for a 24 GB card (g5.xlarge). Served under the same name.
+    repo: openai/gpt-oss-20b
+    served_name: qwen3-coder
+    tool_parser: openai
+    max_num_seqs: 16
+    extra_args: ""
