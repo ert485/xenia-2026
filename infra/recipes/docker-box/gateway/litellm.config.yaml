@@ -34,8 +34,23 @@ router_settings:
   num_retries: 1
   allowed_fails: 1
   cooldown_time: 120
+  # This LiteLLM version looks fallbacks up under the name the client asked for, not the model group an
+  # alias resolves to, so every model_group_alias key below needs its own entry here or requests by
+  # that name never fail over to Bedrock while the GPU box is down (tests/litellm-config.bats checks).
   fallbacks:
     - qwen3-coder: [qwen3-coder-bedrock]
+    - opus: [qwen3-coder-bedrock]
+    - sonnet: [qwen3-coder-bedrock]
+    - haiku: [qwen3-coder-bedrock]
+    - fable: [qwen3-coder-bedrock]
+    - claude-fable-5-1: [qwen3-coder-bedrock]
+    - claude-opus-5-5: [qwen3-coder-bedrock]
+    - claude-sonnet-5: [qwen3-coder-bedrock]
+    - claude-haiku-4-5: [qwen3-coder-bedrock]
+    - claude-haiku-4-5-20251001: [qwen3-coder-bedrock]
+    - claude-opus-4-1: [qwen3-coder-bedrock]
+    - claude-sonnet-4-5: [qwen3-coder-bedrock]
+    - claude-3-5-haiku-latest: [qwen3-coder-bedrock]
   # Claude Code asks for Claude model names; every one of them is the team coder. Remapping haiku to
   # another model later is one line. This pinned LiteLLM version's wildcard model_list support is for
   # provider-prefixed patterns (e.g. "anthropic/*") that pass the suffix through as the real model id
