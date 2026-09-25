@@ -82,8 +82,11 @@ systemctl enable --now xenia-vllm-watchdog.timer
 
 # GPU memory metrics (spec section 10). Best effort: never fail the boot over monitoring.
 if [ ! -x /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl ]; then
-  curl -fsSL -o /tmp/cwagent.deb https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb \
-    && dpkg -i /tmp/cwagent.deb || true
+  if curl -fsSL -o /tmp/cwagent.deb https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb; then
+    dpkg -i /tmp/cwagent.deb || echo "WARNING: CloudWatch agent install failed; GPU memory metrics unavailable" >&2
+  else
+    echo "WARNING: CloudWatch agent download failed; GPU memory metrics unavailable" >&2
+  fi
 fi
 /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s \
   -c "file:$recipe/cloudwatch-agent.json" || true
