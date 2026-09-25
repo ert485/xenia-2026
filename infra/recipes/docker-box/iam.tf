@@ -87,6 +87,58 @@ data "aws_iam_policy_document" "box" {
     actions   = ["ecr:GetAuthorizationToken", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability"]
     resources = ["*"]
   }
+  # box/gpu-capacity-probe.sh (Task 7 follow-up problem 2): create-then-immediately-cancel a
+  # 1-instance capacity reservation, us-east-1 only, so the box can tell whether g6e capacity exists
+  # without a human SSO session. Nothing here is broader than that one workflow: Create/Describe are
+  # region-locked to us-east-1 (these are describe/create actions, which EC2 doesn't support
+  # resource-level ARNs for); CreateTags on a capacity reservation is allowed only in the same
+  # CreateCapacityReservation call and only when it is tagging purpose=capacity-probe; Cancel is
+  # allowed only against a reservation already carrying that same tag.
+  statement {
+    sid       = "GpuCapacityProbeRegionLockedActions"
+    actions   = ["ec2:CreateCapacityReservation", "ec2:DescribeCapacityReservations", "ec2:DescribeInstanceTypeOfferings"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = ["us-east-1"]
+    }
+  }
+  statement {
+    sid       = "GpuCapacityProbeTagOnCreate"
+    actions   = ["ec2:CreateTags"]
+    resources = ["arn:aws:ec2:us-east-1:${local.acct}:capacity-reservation/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = ["us-east-1"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:CreateAction"
+      values   = ["CreateCapacityReservation"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/purpose"
+      values   = ["capacity-probe"]
+    }
+  }
+  statement {
+    sid       = "GpuCapacityProbeCancelOwnReservations"
+    actions   = ["ec2:CancelCapacityReservation"]
+    resources = ["arn:aws:ec2:us-east-1:${local.acct}:capacity-reservation/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = ["us-east-1"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/purpose"
+      values   = ["capacity-probe"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "box" {

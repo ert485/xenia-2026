@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Usage (on the box, via the xenia-gateway SSM document): gateway.sh update|restart|status|logs|app-down|current
-#   update    fetch KIT_REF into /srv/kit, then (re)start the gateway compose project if it exists
+#   update    fetch KIT_REF into /srv/kit, (re)install the GPU capacity-probe timer, then (re)start
+#             the gateway compose project if it exists
 #   restart   re-read secrets from SSM and (re)start the gateway (gateway/start.sh)
 #   status    networks, IMDS guard, compose projects, containers
 #   logs      last 200 lines of the gateway project
@@ -25,6 +26,7 @@ case "${1:-}" in
     git reset -q --hard FETCH_HEAD
     find "$KIT_ON_BOX/infra/recipes/docker-box" -name '*.sh' -exec chmod +x {} +
     log "kit at $(git rev-parse --short HEAD) ($KIT_REF)"
+    install_capacity_probe
     start_gateway
     ;;
   restart)

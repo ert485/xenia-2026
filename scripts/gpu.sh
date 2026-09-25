@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# Usage: scripts/gpu.sh start|stop|status|logs|weights|model <name>
-#   start    start the GPU box (weights stay on the volume; vLLM healthy in about 10 minutes)
-#   stop     stop it (the gateway fails over to Bedrock)
-#   status   instance state, vLLM health, GPU memory and utilization, weights on disk
-#   logs     last 100 lines of the vLLM container
-#   weights  what is in the Hugging Face cache on the volume
-#   model    switch the served weights to a model in infra/recipes/gpu-box/models.yaml
+# Usage: scripts/gpu.sh start|stop|status|logs|weights|model <name>|capacity [region] [type]|capacity-log [n]
+#   start         start the GPU box (weights stay on the volume; vLLM healthy in about 10 minutes)
+#   stop          stop it (the gateway fails over to Bedrock)
+#   status        instance state, vLLM health, GPU memory and utilization, weights on disk
+#   logs          last 100 lines of the vLLM container
+#   weights       what is in the Hugging Face cache on the volume
+#   model         switch the served weights to a model in infra/recipes/gpu-box/models.yaml
+#   capacity      on-demand g6e capacity probe (profile cohack, default region us-east-1, default
+#                 both g6e types) — same create-then-cancel-a-reservation check as the Docker box's
+#                 xenia-gpu-capacity-probe.timer (box/gpu-capacity-probe.sh), for a human on the day
+#   capacity-log  last n (default 50) probe lines from CloudWatch (/xenia/boxes,
+#                 xenia-gpu-capacity-probe stream) plus an availability summary per type/zone
 # The AWS profile is GPU_PROFILE, else the stack's host_profile output, else cohack (deviation 9).
+# capacity/capacity-log always use profile cohack: they are a human's on-demand check, not tied to
+# whichever account host_profile currently resolves to.
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 require_cmd aws jq
@@ -14,6 +21,68 @@ require_cmd aws jq
 action="${1:-}"
 region=us-east-1
 recipe_on_box=/srv/kit/infra/recipes/gpu-box
+
+if [[ "$action" == "capacity" ]]; then
+  cap_region="${2:-us-east-1}"
+  only_type="${3:-}"
+  aws_cap() { aws --profile cohack --region "$cap_region" "$@"; }
+  types=(g6e.xlarge g6e.2xlarge)
+  [[ -z "$only_type" ]] || types=("$only_type")
+
+  ids="$(aws_cap ec2 describe-capacity-reservations \
+    --filters Name=tag:purpose,Values=capacity-probe Name=state,Values=active,pending \
+    --query 'CapacityReservations[].CapacityReservationId' --output text)"
+  if [[ -n "$ids" && "$ids" != "None" ]]; then
+    for cid in $ids; do
+      aws_cap ec2 cancel-capacity-reservation --capacity-reservation-id "$cid" >/dev/null \
+        || die "ALERT: failed to cancel stale reservation $cid"
+      log "swept stale reservation $cid"
+    done
+  fi
+
+  for t in "${types[@]}"; do
+    zones="$(aws_cap ec2 describe-instance-type-offerings --location-type availability-zone \
+      --filters Name=instance-type,Values="$t" --query 'InstanceTypeOfferings[].Location' --output text)"
+    if [[ -z "$zones" || "$zones" == "None" ]]; then
+      echo "$t: no zone in $cap_region offers this type"
+      continue
+    fi
+    for az in $zones; do
+      if out="$(aws_cap ec2 create-capacity-reservation \
+            --instance-type "$t" --instance-platform "Linux/UNIX" --availability-zone "$az" \
+            --instance-count 1 \
+            --tag-specifications 'ResourceType=capacity-reservation,Tags=[{Key=kit,Value=true},{Key=purpose,Value=capacity-probe}]' \
+            --query 'CapacityReservation.[CapacityReservationId,State]' --output text 2>&1)"; then
+        read -r rid rstate <<< "$out"
+        echo "$t $az: AVAILABLE (reservation $rid, $rstate)"
+        aws_cap ec2 cancel-capacity-reservation --capacity-reservation-id "$rid" >/dev/null \
+          || die "ALERT: failed to cancel reservation $rid ($t $az)"
+      else
+        echo "$t $az: NONE"
+      fi
+    done
+  done
+  exit 0
+fi
+
+if [[ "$action" == "capacity-log" ]]; then
+  n="${2:-50}"
+  aws_cap() { aws --profile cohack --region us-east-1 "$@"; }
+  lines="$(aws_cap logs filter-log-events --log-group-name /xenia/boxes \
+    --log-stream-names xenia-gpu-capacity-probe --query 'events[].message' --output text 2>/dev/null)" \
+    || die "could not read /xenia/boxes (profile cohack, us-east-1)"
+  lines="$(tail -n "$n" <<< "$lines")"
+  [[ -n "$lines" ]] || die "no xenia-gpu-capacity-probe log lines found in /xenia/boxes yet"
+  printf '%s\n' "$lines"
+  echo
+  echo "availability summary (rounds AVAILABLE / total probed, per type and zone):"
+  printf '%s\n' "$lines" \
+    | grep -E ': (AVAILABLE|NONE)' \
+    | sed -E 's/^\[[^]]*\] ([^ ]+) ([^ ]+): (AVAILABLE|NONE).*/\1 \2 \3/' \
+    | awk '{ key=$1" "$2; total[key]++; if ($3=="AVAILABLE") avail[key]++ } END { for (k in total) printf "  %-24s %d/%d\n", k, avail[k]+0, total[k] }' \
+    | sort
+  exit 0
+fi
 
 if [[ "$action" == "model" ]]; then
   name="${2:?usage: scripts/gpu.sh model <name from models.yaml>}"
@@ -117,6 +186,6 @@ case "$action" in
     log "switched to $name; a new repository downloads first (watch scripts/gpu.sh logs)"
     ;;
   *)
-    die "usage: scripts/gpu.sh start|stop|status|logs|weights|model <name>"
+    die "usage: scripts/gpu.sh start|stop|status|logs|weights|model <name>|capacity [region] [type]|capacity-log [n]"
     ;;
 esac

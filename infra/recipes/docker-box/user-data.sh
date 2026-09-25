@@ -184,6 +184,7 @@ find /srv/kit/infra/recipes/docker-box -name '*.sh' -exec chmod +x {} +
 # shellcheck source=infra/recipes/docker-box/box/lib.sh
 source /srv/kit/infra/recipes/docker-box/box/lib.sh
 ensure_networks
+install_capacity_probe
 
 # Task 7 adds gateway/compose.yml; before that this only updates the checkout. A failure here must
 # not abort first boot (the rest of provisioning, and later scripts/box.sh update calls, still work),

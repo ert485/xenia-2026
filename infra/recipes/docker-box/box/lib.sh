@@ -128,6 +128,38 @@ ensure_networks() {
 #   1  not yet running (container hasn't started, or has no PID yet) — caller may retry
 #   2  couldn't check (docker/network-inspect/nsenter/ip error) — the message names which
 #   3  mismatch  "<actual route>" (the network's gateway address is in the message too)
+# install_capacity_probe: idempotent install of the xenia-gpu-capacity-probe systemd service + timer
+# (every 10 minutes; see box/gpu-capacity-probe.sh). Called from both user-data.sh (first boot) and
+# box/gateway.sh update, so a box that is already running gets it too — main.tf ignores user_data
+# changes (ignore_changes = [ami, user_data]), so a plain re-apply never reaches a running box.
+install_capacity_probe() {
+  local unit_dir="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+  cat > "$unit_dir/xenia-gpu-capacity-probe.service" <<EOF
+[Unit]
+Description=xenia: probe g6e GPU capacity in us-east-1 (create+cancel a 1-instance reservation per zone)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$KIT_ON_BOX/infra/recipes/docker-box/box/gpu-capacity-probe.sh
+EOF
+  cat > "$unit_dir/xenia-gpu-capacity-probe.timer" <<'EOF'
+[Unit]
+Description=xenia: run the GPU capacity probe every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now xenia-gpu-capacity-probe.timer
+}
+
 gateway_route_check() {
   local container="$1" network="$2" state pid want route rc
   state="$(docker inspect -f '{{.State.Running}} {{.State.Pid}}' "$container" 2>/dev/null)" || state=""
