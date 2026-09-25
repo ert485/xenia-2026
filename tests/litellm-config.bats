@@ -31,3 +31,22 @@ PY
   [ "$status" -eq 1 ]
   [ "$output" = "claude-new-model" ]
 }
+
+# A stopped/dead GPU box's EIP drops packets (no RST): a request just hangs until some timeout
+# fires, so the vLLM deployment must fail over fast — a short timeout and zero retries, one attempt
+# before Bedrock, not two.
+@test "the vLLM deployment has zero retries and a timeout of 30s or less" {
+  run python3 - "$CONFIG" <<'PY'
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+vllm = next(m["litellm_params"] for m in d["model_list"] if m["model_name"] == "qwen3-coder")
+retries = vllm.get("max_retries", vllm.get("num_retries"))
+assert retries == 0, f"vLLM deployment retries must be 0, got {retries!r}"
+timeout = vllm["timeout"]
+assert timeout <= 30, f"vLLM deployment timeout must be <= 30s, got {timeout!r}"
+print("ok")
+PY
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}

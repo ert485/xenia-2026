@@ -6,11 +6,18 @@ model_list:
       model: hosted_vllm/qwen3-coder
       api_base: os.environ/VLLM_API_BASE
       api_key: os.environ/VLLM_API_KEY
-      # A stopped GPU box drops packets rather than refusing the connection, so a long timeout here
-      # would eat into Claude Code's 300s silent-stream watchdog before failover to Bedrock ever
-      # fires. 90s lets the fallback happen well inside that budget.
-      timeout: 90
+      # A stopped (or just-dead) GPU box's EIP drops packets instead of refusing the connection (no
+      # RST), so a request just hangs until some timeout fires rather than failing fast. Pinned
+      # LiteLLM v1.102.1's litellm_params doesn't expose a separate connect-timeout knob (only a
+      # single request `timeout` plus `stream_timeout` for streamed responses) — this is the
+      # single-timeout fallback: 30s bounds one non-streamed attempt, 90s bounds one streamed
+      # attempt, both well inside Claude Code's 300s silent-stream watchdog before Bedrock takes
+      # over. max_retries: 0 overrides the router's global num_retries (1) for this deployment only,
+      # so a dead GPU costs exactly one short attempt, not two, before falling over; Bedrock keeps
+      # the router default.
+      timeout: 30
       stream_timeout: 90
+      max_retries: 0
     model_info:
       id: qwen3-coder-vllm
       max_input_tokens: 131072

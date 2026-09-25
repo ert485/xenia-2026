@@ -29,6 +29,29 @@ ssm_get() {
     --query Parameter.Value --output text
 }
 
+# vllm_probe <api_base> <token> <placeholder>: prints the api_base the gateway should use. The
+# gpu-box stack writes /xenia/gpu/api-base once and never clears it, so it keeps naming the GPU
+# box's EIP even with no GPU instance running (EC2 capacity) or while the box is stopped — an
+# address that drops packets rather than refusing the connection, so an unprobed LiteLLM eats the
+# full vLLM timeout on every request before failing over to Bedrock. If <api_base> is already the
+# placeholder there is nothing to probe. Otherwise hit the vLLM health path (same one
+# infra/recipes/gpu-box/watchdog.sh polls) with a 3s timeout; on success print <api_base> unchanged,
+# on failure log why and print <placeholder> (which fails DNS instantly instead of hanging).
+vllm_probe() {
+  local api_base="$1" token="$2" placeholder="$3"
+  if [[ "$api_base" == "$placeholder" ]]; then
+    echo "$api_base"
+    return 0
+  fi
+  if curl -sk -m 3 -o /dev/null -H "Authorization: Bearer $token" "${api_base%/v1}/health"; then
+    log "vLLM backend: reachable ($api_base)"
+    echo "$api_base"
+  else
+    log "vLLM backend not reachable; using the instant-fail placeholder, requests go to Bedrock"
+    echo "$placeholder"
+  fi
+}
+
 # list_previews: running or stopped preview projects (pr-<n>), one per line, oldest first, ordered by
 # the creation time of the project's pr-<n>-web container.
 list_previews() {
@@ -105,6 +128,38 @@ ensure_networks() {
 #   1  not yet running (container hasn't started, or has no PID yet) — caller may retry
 #   2  couldn't check (docker/network-inspect/nsenter/ip error) — the message names which
 #   3  mismatch  "<actual route>" (the network's gateway address is in the message too)
+# install_capacity_probe: idempotent install of the xenia-gpu-capacity-probe systemd service + timer
+# (every 10 minutes; see box/gpu-capacity-probe.sh). Called from both user-data.sh (first boot) and
+# box/gateway.sh update, so a box that is already running gets it too — main.tf ignores user_data
+# changes (ignore_changes = [ami, user_data]), so a plain re-apply never reaches a running box.
+install_capacity_probe() {
+  local unit_dir="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+  cat > "$unit_dir/xenia-gpu-capacity-probe.service" <<EOF
+[Unit]
+Description=xenia: probe g6e GPU capacity in us-east-1 (create+cancel a 1-instance reservation per zone)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$KIT_ON_BOX/infra/recipes/docker-box/box/gpu-capacity-probe.sh
+EOF
+  cat > "$unit_dir/xenia-gpu-capacity-probe.timer" <<'EOF'
+[Unit]
+Description=xenia: run the GPU capacity probe every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now xenia-gpu-capacity-probe.timer
+}
+
 gateway_route_check() {
   local container="$1" network="$2" state pid want route rc
   state="$(docker inspect -f '{{.State.Running}} {{.State.Pid}}' "$container" 2>/dev/null)" || state=""
