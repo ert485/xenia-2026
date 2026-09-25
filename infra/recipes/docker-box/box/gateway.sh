@@ -31,14 +31,14 @@ case "${1:-}" in
     start_gateway
     ;;
   status)
-    echo "networks: $(docker network ls --format '{{.Name}}' | grep -xE 'gateway|edge' | sort | tr '\n' ' ')"
+    echo "networks: $(docker network ls --format '{{.Name}}' | grep -xE 'backend|edge' | sort | tr '\n' ' ')"
     if iptables -C DOCKER-USER ! -i gw0 -d 169.254.169.254 -j DROP 2>/dev/null; then
       echo "imds guard: on"
     else
       echo "imds guard: MISSING (systemctl restart xenia-imds-guard)"
     fi
     echo "kit: $(git -C "$KIT_ON_BOX" rev-parse --short HEAD) ($KIT_REF)"
-    route_msg="$(gateway_route_check gateway-caddy-1 gateway)" && route_rc=0 || route_rc=$?
+    route_msg="$(gateway_route_check gateway-caddy-1 backend)" && route_rc=0 || route_rc=$?
     case "$route_rc" in
       0) echo "caddy default route: ok ($route_msg)" ;;
       1) echo "caddy default route: cannot check ($route_msg)" ;;

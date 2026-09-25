@@ -39,10 +39,19 @@ systemctl restart docker
 docker compose version
 docker buildx version
 
-docker network inspect gateway >/dev/null 2>&1 || docker network create --opt com.docker.network.bridge.name=gw0 gateway
-docker network inspect edge >/dev/null 2>&1 || docker network create --opt com.docker.network.bridge.name=edge0 edge
+# The kit checkout is cloned here (rather than after network setup) so this script and every later
+# boot/update can share ensure_networks() from box/lib.sh instead of duplicating network creation.
+if [ ! -d /srv/kit/.git ]; then
+  git clone --depth 1 --branch "${kit_ref}" "https://github.com/${kit_repo}.git" /srv/kit
+fi
+find /srv/kit/infra/recipes/docker-box -name '*.sh' -exec chmod +x {} +
 
-# IMDS guard (deviation 1): only the gateway network may reach the instance metadata service.
+# shellcheck source=infra/recipes/docker-box/box/lib.sh
+source /srv/kit/infra/recipes/docker-box/box/lib.sh
+ensure_networks
+
+# IMDS guard (deviation 1): only the backend network (bridge gw0) may reach the instance metadata
+# service.
 # Docker keeps an existing DOCKER-USER chain's contents across restarts, but the chain itself may
 # not exist yet (a fresh dockerd hasn't created it), so the script always ensures the chain first.
 cat > /usr/local/sbin/xenia-imds-guard.sh <<'EOF'
@@ -76,7 +85,7 @@ EOF
 # the DOCKER-USER chain.
 cat > /etc/systemd/system/xenia-imds-guard.service <<'EOF'
 [Unit]
-Description=xenia: drop container traffic to instance metadata except from the gateway network
+Description=xenia: drop container traffic to instance metadata except from the backend network (gw0)
 After=docker.service
 Requires=docker.service
 PartOf=docker.service
@@ -97,11 +106,6 @@ cat > /etc/tmpfiles.d/xenia.conf <<'EOF'
 d /run/xenia 0700 root root -
 EOF
 systemd-tmpfiles --create /etc/tmpfiles.d/xenia.conf
-
-if [ ! -d /srv/kit/.git ]; then
-  git clone --depth 1 --branch "${kit_ref}" "https://github.com/${kit_repo}.git" /srv/kit
-fi
-find /srv/kit/infra/recipes/docker-box -name '*.sh' -exec chmod +x {} +
 
 cat > /etc/xenia.env <<'EOF'
 ZONE=${zone_name}

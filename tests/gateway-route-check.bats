@@ -44,35 +44,35 @@ EOF
 
 @test "ok: the route matches the network's gateway address" {
   NET_GATEWAY="172.20.0.1" ROUTE_LINE="default via 172.20.0.1 dev eth0" \
-    run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 gateway'
+    run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 backend'
   [ "$status" -eq 0 ]
   [ "$output" = "default via 172.20.0.1 dev eth0" ]
 }
 
 @test "not running: container has no pid yet" {
   CONTAINER_RUNNING=false \
-    run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 gateway'
+    run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 backend'
   [ "$status" -eq 1 ]
   [[ "$output" == *"not running"* ]]
 }
 
 @test "cannot check: nsenter fails (e.g. exec into an image with no ip is not what's used, but the ns lookup itself can still fail)" {
   NSENTER_FAIL=1 NSENTER_ERR="nsenter: cannot open /proc/4242/ns/net: No such file or directory" \
-    run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 gateway'
+    run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 backend'
   [ "$status" -eq 2 ]
   [[ "$output" == *"cannot open /proc/4242/ns/net"* ]]
 }
 
 @test "cannot check: the network itself can't be inspected" {
   NET_INSPECT_FAIL=1 \
-    run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 gateway'
+    run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 backend'
   [ "$status" -eq 2 ]
   [[ "$output" == *"No such network"* ]]
 }
 
 @test "mismatch: caddy's default route goes via the wrong network" {
   NET_GATEWAY="172.20.0.1" ROUTE_LINE="default via 172.30.0.1 dev eth1" \
-    run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 gateway'
+    run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 backend'
   [ "$status" -eq 3 ]
   [[ "$output" == *"172.30.0.1"* ]]
   [[ "$output" == *"172.20.0.1"* ]]

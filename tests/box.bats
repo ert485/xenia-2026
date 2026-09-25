@@ -11,7 +11,7 @@ case "$*" in
   *"ec2 describe-instances"*)                 echo i-0123456789abcdef0 ;;
   *"ssm send-command"*)                       echo cmd-0001 ;;
   *"get-command-invocation"*"--query Status"*) echo "${FAKE_STATUS:-Success}" ;;
-  *"get-command-invocation"*)                 printf 'networks: gateway edge\taccount %012d\n' 7 ;;
+  *"get-command-invocation"*)                 printf 'networks: backend edge\taccount %012d\n' 7 ;;
 esac
 EOF
   chmod +x "$TMP/aws"
@@ -25,7 +25,7 @@ EOF
   [ "$status" -eq 0 ]
   grep -q -- '--document-name xenia-gateway' "$AWS_CALLS"
   grep -qF '{"Action":["status"]}' "$AWS_CALLS"
-  [[ "$output" == *"networks: gateway edge"* ]]
+  [[ "$output" == *"networks: backend edge"* ]]
   [[ "$output" == *"<account-id>"* ]]
 }
 

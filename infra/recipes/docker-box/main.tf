@@ -82,8 +82,8 @@ resource "aws_instance" "box" {
   })
 
   # Deviation 1: IMDSv2 required, hop limit 2 so Caddy (Route 53 DNS-01) and LiteLLM (Bedrock) can use
-  # the instance role from containers on the gateway network; the iptables guard in user-data drops
-  # metadata traffic from every other bridge.
+  # the instance role from containers on the backend network (bridge gw0); the iptables guard in
+  # user-data drops metadata traffic from every other bridge.
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"

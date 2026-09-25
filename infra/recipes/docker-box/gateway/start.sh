@@ -38,22 +38,28 @@ fi
 
 log "docker engine: $(docker version --format '{{.Server.Version}}')"
 
+# Idempotent: creates edge/backend if missing, and migrates a box still carrying the old `gateway`
+# network (see the comment on ensure_networks in box/lib.sh).
+ensure_networks
+
 cd "$here"
 docker compose build --quiet caddy
 docker compose up -d --remove-orphans
 docker compose ps --format 'table {{.Name}}\t{{.Status}}'
 
-# Caddy must default-route via the gateway network's gw0, or its DNS-01/instance-role traffic is
+# Caddy must default-route via the backend network's gw0, or its DNS-01/instance-role traffic is
 # dropped by the IMDS guard (Task 6 review carry). `gw_priority` needs Docker Engine >= 28 (see the
-# comment in compose.yml); the box's AL2023 `docker` package is unpinned, so this is asserted, not
-# assumed. gateway_route_check (box/lib.sh) reads the route from the HOST namespace via nsenter —
-# not `docker exec ... ip route`, which always fails on the pinned Caddy image (no `ip` in it) and
-# would otherwise be misread as an empty/missing route. A short retry loop covers the "not running
-# yet" outcome (rc 1) for the gap between `up -d` returning and the container starting; the other
-# two outcomes (rc 2 tool/namespace error, rc 3 a real route mismatch) fail immediately.
+# comment in compose.yml); the box's AL2023 `docker` package is unpinned — confirmed Engine 25.0.16
+# on the real box, where `gw_priority` and `priority` are both ignored, hence `backend` instead of
+# `gateway` as the Docker network's name (Engine 25 picks the default route by lexical network-name
+# order). gateway_route_check (box/lib.sh) reads the route from the HOST namespace via nsenter — not
+# `docker exec ... ip route`, which always fails on the pinned Caddy image (no `ip` in it) and would
+# otherwise be misread as an empty/missing route. A short retry loop covers the "not running yet"
+# outcome (rc 1) for the gap between `up -d` returning and the container starting; the other two
+# outcomes (rc 2 tool/namespace error, rc 3 a real route mismatch) fail immediately.
 msg="" rc=0
 for _ in $(seq 1 15); do
-  msg="$(gateway_route_check gateway-caddy-1 gateway)" && rc=0 || rc=$?
+  msg="$(gateway_route_check gateway-caddy-1 backend)" && rc=0 || rc=$?
   [[ "$rc" -eq 1 ]] || break
   sleep 1
 done

@@ -65,6 +65,33 @@ preview_cap_for() {
   if grep -qx -- "$1" <<< "$all"; then echo 3; else echo 2; fi
 }
 
+# ensure_networks: create the box's Docker networks if missing. Idempotent — safe to call on every
+# boot and every gateway update, not just once. Also migrates off an old network literally named
+# `gateway`: Docker Engine 25 (confirmed on the real box; `gw_priority`/`priority` don't help there)
+# picks a multi-network container's default route by whichever attached network's NAME sorts first
+# lexicographically, not by connection order — `edge` sorts before `gateway`, so Caddy always routed
+# through `edge0` there and the IMDS guard dropped its DNS-01/instance-role traffic. The fix is the
+# Docker network name `backend` (`backend` < `edge`, lexically); the bridge name stays `gw0` (the
+# IMDS guard's iptables rule keys off the bridge name, not the network's Docker-assigned name). Both
+# `gateway` and `backend` want bridge `gw0` and can't share it, so an old `gateway` network has to be
+# torn down (bringing the gateway compose project down with it) before `backend` can be created.
+ensure_networks() {
+  docker network inspect edge >/dev/null 2>&1 \
+    || docker network create --opt com.docker.network.bridge.name=edge0 edge
+
+  if docker network inspect gateway >/dev/null 2>&1; then
+    log "found the old 'gateway' Docker network; migrating the gateway compose project to 'backend'"
+    local gw="$KIT_ON_BOX/infra/recipes/docker-box/gateway"
+    if [[ -f "$gw/compose.yml" ]]; then
+      ( cd "$gw" && docker compose down --remove-orphans )
+    fi
+    docker network rm gateway
+  fi
+
+  docker network inspect backend >/dev/null 2>&1 \
+    || docker network create --opt com.docker.network.bridge.name=gw0 backend
+}
+
 # gateway_route_check <container> <network>: does <container>'s default route go via <network>'s
 # gateway address? Reads the route from the HOST network namespace with nsenter, never by execing
 # `ip` inside the container: the pinned Caddy image (debian bookworm-slim, only

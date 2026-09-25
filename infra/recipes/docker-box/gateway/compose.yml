@@ -22,15 +22,25 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     networks:
-      gateway:
+      backend:
         # Both keys are set because they fix different things and neither alone is reliable here:
         # `priority` is Compose's own connection-order hint (which network Compose attaches first);
-        # it does NOT control the container's default route. `gw_priority` is what actually pins the
-        # default gateway, but it needs Docker Engine >= 28 (API 1.48) — the box installs AL2023's
-        # unpinned `docker` package (dnf install docker), which is not guaranteed to be that new, so
-        # `gw_priority` may simply be ignored. Belt and suspenders: if `gw_priority` is honored it
-        # wins outright; if not, `priority` at least makes Compose attach `gateway` first, which is
-        # libnetwork's tiebreaker for the default route when `gw_priority` isn't understood.
+        # it does NOT control the container's default route on its own. `gw_priority` is what
+        # actually pins the default gateway, but it needs Docker Engine >= 28 (API 1.48) — the box
+        # installs AL2023's unpinned `docker` package (dnf install docker), which was confirmed on
+        # the real box to be Engine 25.0.16, so `gw_priority` is ignored there.
+        #
+        # On Engine 25, a multi-network container's default route is NOT decided by connection
+        # order (so `priority` doesn't help either): it's picked from whichever attached network's
+        # NAME sorts first lexicographically (confirmed on the box: an `aaa-test` network won
+        # regardless of attach order). `edge` sorts before `gateway`, so with that name Caddy always
+        # routed via `edge0` and the IMDS guard dropped its DNS-01/instance-role traffic. The Docker
+        # network here is named `backend` instead (Caddy, LiteLLM, Postgres) specifically because
+        # `backend` < `edge` lexically, so Engine 25 picks it; `gw_priority` then also does the
+        # right thing outright once the box is ever upgraded to Engine 28+. The bridge name stays
+        # `gw0` (the DOCKER-USER IMDS guard rule keys off that, not the network's Docker-assigned
+        # name), and the compose *project* stays named `gateway` (container names, the SSM document,
+        # etc. are unaffected) — only this Docker network was renamed.
         # start.sh asserts the actual route after `up` and dies loudly if this ever picks `edge`
         # instead (the IMDS guard would then drop Caddy's instance-role traffic and DNS-01 fails).
         priority: 100
@@ -55,7 +65,7 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - gateway
+      - backend
 
   postgres:
     image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
@@ -73,10 +83,10 @@ services:
       timeout: 3s
       retries: 20
     networks:
-      - gateway
+      - backend
 
 networks:
-  gateway:
+  backend:
     external: true
   edge:
     external: true
