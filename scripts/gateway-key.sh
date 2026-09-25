@@ -7,6 +7,9 @@
 # (deviation 8), never through the public hostname. Needs session-manager-plugin.
 # Test overrides: GATEWAY_API_BASE skips the tunnel, GATEWAY_MASTER_KEY skips the SSM read.
 set -euo pipefail
+# Monitor mode (job control) gives the background port-forward its own process group, so cleanup
+# can kill session-manager-plugin along with the aws ssm start-session wrapper, instead of leaking it.
+set -m
 source "$(dirname "$0")/lib/common.sh"
 require_cmd curl jq
 
@@ -31,7 +34,11 @@ tunnel=""
 hdr="$(mktemp)"
 cleanup() {
   rm -f "$hdr"
-  if [[ -n "$tunnel" ]]; then kill "$tunnel" 2>/dev/null || true; fi
+  if [[ -n "$tunnel" ]]; then
+    # Negative pid signals the whole process group (set -m above put the tunnel in its own), so
+    # session-manager-plugin (spawned by aws ssm start-session) dies too, not just the wrapper.
+    kill -TERM -- "-$tunnel" 2>/dev/null || kill "$tunnel" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
@@ -44,6 +51,12 @@ if [[ -z "$api" || -z "$key" ]]; then
 fi
 if [[ -z "$api" ]]; then
   port="${GATEWAY_LOCAL_PORT:-14000}"
+  # Refuse to reuse a port something else is already listening on: the master key would otherwise be
+  # sent straight to a foreign listener instead of the tunnel we think we opened.
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+    exec 3>&- 3<&-
+    die "local port $port is already in use; refusing to open the tunnel there (set GATEWAY_LOCAL_PORT to another port)"
+  fi
   iid="$(aws ec2 describe-instances --profile cohack --region ca-central-1 \
     --filters Name=tag:xenia-role,Values=docker-box Name=instance-state-name,Values=running \
     --query 'Reservations[].Instances[].InstanceId' --output text)"
@@ -85,6 +98,7 @@ case "$action" in
     log "revoked every key with alias $1"
     ;;
   list)
+    # size=100: one page is enough for a hackathon-sized team; add pagination if that ever changes.
     call "$api/key/list?return_full_object=true&size=100" \
       | jq -r '.keys[] | "\(.key_alias)\tspend=\(.spend)\tbudget=\(.max_budget)"'
     ;;

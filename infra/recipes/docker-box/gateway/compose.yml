@@ -23,11 +23,17 @@ services:
       - caddy-config:/config
     networks:
       gateway:
-        # connected first, so its default route (and the instance role, for DNS-01) is via gw0.
-        # gw_priority is the Docker 28 / Compose 2.30+ way to pin the container's default gateway to
-        # a specific network attachment; the box installs Compose v2.39.2 (VERSIONS.md), which
-        # supports it. If a future box image ever downgrades below that, fall back to `priority`
-        # instead (older, DNS-search-order only, does not affect the default route).
+        # Both keys are set because they fix different things and neither alone is reliable here:
+        # `priority` is Compose's own connection-order hint (which network Compose attaches first);
+        # it does NOT control the container's default route. `gw_priority` is what actually pins the
+        # default gateway, but it needs Docker Engine >= 28 (API 1.48) — the box installs AL2023's
+        # unpinned `docker` package (dnf install docker), which is not guaranteed to be that new, so
+        # `gw_priority` may simply be ignored. Belt and suspenders: if `gw_priority` is honored it
+        # wins outright; if not, `priority` at least makes Compose attach `gateway` first, which is
+        # libnetwork's tiebreaker for the default route when `gw_priority` isn't understood.
+        # start.sh asserts the actual route after `up` and dies loudly if this ever picks `edge`
+        # instead (the IMDS guard would then drop Caddy's instance-role traffic and DNS-01 fails).
+        priority: 100
         gw_priority: 100
       edge: {}
 

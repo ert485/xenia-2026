@@ -36,11 +36,28 @@ else
   log "vLLM backend: not provisioned yet; requests fail over to Bedrock"
 fi
 
+log "docker engine: $(docker version --format '{{.Server.Version}}')"
+
 cd "$here"
 docker compose build --quiet caddy
 docker compose up -d --remove-orphans
 docker compose ps --format 'table {{.Name}}\t{{.Status}}'
+
 # Caddy must default-route via the gateway network's gw0, or its DNS-01/instance-role traffic is
-# dropped by the IMDS guard (Task 6 review carry). Print it so `gateway.sh status` and Step 9 can
-# both prove it.
-docker exec gateway-caddy-1 ip route | head -1
+# dropped by the IMDS guard (Task 6 review carry). `gw_priority` needs Docker Engine >= 28 (see the
+# comment in compose.yml); the box's AL2023 `docker` package is unpinned, so this is asserted, not
+# assumed. A short retry loop covers the gap between `up -d` returning and the container's network
+# namespace being fully set up.
+gw_addr="$(docker network inspect gateway -f '{{(index .IPAM.Config 0).Gateway}}')"
+caddy_route=""
+for _ in $(seq 1 15); do
+  caddy_route="$(docker exec gateway-caddy-1 ip route 2>/dev/null | head -1 || true)"
+  [[ -n "$caddy_route" ]] && break
+  sleep 1
+done
+[[ -n "$caddy_route" ]] || die "gateway-caddy-1 never came up to check its default route"
+log "caddy default route: $caddy_route (gateway network gw0 address: $gw_addr)"
+case "$caddy_route" in
+  "default via $gw_addr "*) : ;;
+  *) die "caddy's default route is not via the gateway network ($gw_addr); got '$caddy_route' — its DNS-01/instance-role traffic would be dropped by the IMDS guard. Check gw_priority/priority in compose.yml and the box's Docker Engine version." ;;
+esac

@@ -8,10 +8,15 @@ setup() {
   cat > "$TMP/curl" <<'EOF'
 #!/usr/bin/env bash
 # fake curl: records the URL, the -d body, and headers (including -H @file); answers canned JSON.
+# Fails outright if the Authorization header ever shows up inline in argv, since that's exactly the
+# leak (visible in `ps`/process listings) that the @file form exists to avoid.
 url=""; body=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -H) if [[ "$2" == @* ]]; then cat "${2#@}" >> "$CURL_CALLS"; else printf 'header %s\n' "$2" >> "$CURL_CALLS"; fi; shift 2 ;;
+    -H) if [[ "$2" == @* ]]; then cat "${2#@}" >> "$CURL_CALLS"; else
+          case "$2" in Authorization:*) echo "fake curl: refusing an inline Authorization header" >&2; exit 1 ;; esac
+          printf 'header %s\n' "$2" >> "$CURL_CALLS"
+        fi; shift 2 ;;
     -d|--data) body="$2"; shift 2 ;;
     -X|-m|-o|-w) shift 2 ;;
     http*) url="$1"; shift ;;
@@ -42,6 +47,8 @@ EOF
   [ "$(jq -r .max_budget <<< "$body")" = "30" ]
   [ "$(jq -r .budget_duration <<< "$body")" = "30d" ]
   [ "$(jq -r .max_parallel_requests <<< "$body")" = "8" ]
+  [ "$(jq -r .rpm_limit <<< "$body")" = "120" ]
+  [ "$(jq -r .tpm_limit <<< "$body")" = "400000" ]
   [ "$(jq -r .metadata.kind <<< "$body")" = "member" ]
   [ "$(jq -c .models <<< "$body")" = '["qwen3-coder","qwen3-coder-bedrock"]' ]
 }
