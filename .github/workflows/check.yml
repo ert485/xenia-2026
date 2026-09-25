@@ -34,7 +34,7 @@ jobs:
       - name: install kit tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q shellcheck bats
+          sudo apt-get install -y -q shellcheck bats python3-yaml
           pipx install zizmor
           curl -sSfL https://github.com/rhysd/actionlint/releases/download/v1.7.11/actionlint_1.7.11_linux_amd64.tar.gz | tar xz actionlint
           sudo mv actionlint /usr/local/bin/actionlint

@@ -1,0 +1,5 @@
+# One entry per known false positive, by gitleaks fingerprint (commit:file:rule:line). Add a line only
+# for a value that is provably fake, and say why; everything else gets fixed or rotated (P-public).
+# A made-up master key in the tunnel test's aws shim, committed before the fixture switched to the
+# allow-listed sk-xxxx form. gitleaks scans every commit in a PR, so the old commit needs this entry.
+c32b2ac021cb8ca31ed52374c0191117b9105624:tests/gateway-key-tunnel.bats:litellm-virtual-key:21

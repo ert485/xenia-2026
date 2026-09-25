@@ -1,0 +1,27 @@
+schemaVersion: "2.2"
+description: "xenia: deploy a repo's web image to app. on the Docker box"
+parameters:
+  Repo:
+    type: String
+    description: "owner/repo"
+    allowedPattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+  Sha:
+    type: String
+    description: "commit to deploy (40 hex)"
+    allowedPattern: "^[0-9a-f]{40}$"
+  Image:
+    type: String
+    description: "ECR image built by deploy-docker-box.yml"
+    allowedPattern: "^[A-Za-z0-9._/:-]+$"
+  AppDir:
+    type: String
+    description: "directory holding compose.yml, relative to the repo root"
+    default: "."
+    allowedPattern: "^[A-Za-z0-9._/-]+$"
+mainSteps:
+  - action: aws:runShellScript
+    name: deploy
+    inputs:
+      timeoutSeconds: "900"
+      runCommand:
+        - /srv/kit/infra/recipes/docker-box/box/deploy.sh '{{ Repo }}' '{{ Sha }}' '{{ Image }}' '{{ AppDir }}'

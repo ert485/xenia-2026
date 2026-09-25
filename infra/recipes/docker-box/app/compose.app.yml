@@ -1,0 +1,15 @@
+# Kit override for the demo deploy (compose project "app"). Joins the team's web service to the edge
+# network under the fixed name Caddy routes app. to, and drops host ports: Caddy is the only way in.
+# !reset needs Compose 2.24 or later (the box has 2.39.2).
+services:
+  web:
+    container_name: app-web
+    restart: unless-stopped
+    networks:
+      - default
+      - edge
+    ports: !reset []
+
+networks:
+  edge:
+    external: true

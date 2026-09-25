@@ -1,0 +1,42 @@
+# devcontainer-image: prebuilds the dev container image to GHCR so venue Wi-Fi never gates the first
+# session (spec section 11). devcontainer.json's build.cacheFrom points at this image.
+name: devcontainer-image
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".devcontainer/**"
+      - "plugin/**"
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: devcontainer-image
+  cancel-in-progress: true
+jobs:
+  image:
+    name: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: image name (GHCR needs lowercase)
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-devcontainer" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
+        with:
+          imageName: ${{ steps.name.outputs.image }}
+          imageTag: main
+          cacheFrom: ${{ steps.name.outputs.image }}:main
+          push: always
+          platform: linux/amd64

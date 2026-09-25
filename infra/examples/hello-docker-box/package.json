@@ -1,0 +1,14 @@
+{
+  "name": "hello-docker-box",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kit example: proves the deploy path to app.26.cohack.tetl.ca (Node 22, Postgres)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
