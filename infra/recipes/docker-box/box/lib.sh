@@ -64,3 +64,36 @@ preview_cap_for() {
   all="$(list_previews)"
   if grep -qx -- "$1" <<< "$all"; then echo 3; else echo 2; fi
 }
+
+# gateway_route_check <container> <network>: does <container>'s default route go via <network>'s
+# gateway address? Reads the route from the HOST network namespace with nsenter, never by execing
+# `ip` inside the container: the pinned Caddy image (debian bookworm-slim, only
+# ca-certificates/libcap2-bin/mailcap) has no `ip`, so a `docker exec ... ip route` always fails
+# there, and a swallowed exec error used to be misread as "the route is empty" (a false hard
+# failure on every single run). Shared by gateway/start.sh (fails loudly) and box/gateway.sh status
+# (reports, doesn't fail).
+#
+# Prints one line to stdout and returns:
+#   0  ok        "<the default route line>"
+#   1  not yet running (container hasn't started, or has no PID yet) — caller may retry
+#   2  couldn't check (docker/network-inspect/nsenter/ip error) — the message names which
+#   3  mismatch  "<actual route>" (the network's gateway address is in the message too)
+gateway_route_check() {
+  local container="$1" network="$2" state pid want route rc
+  state="$(docker inspect -f '{{.State.Running}} {{.State.Pid}}' "$container" 2>/dev/null)" || state=""
+  [[ "$state" == "true "* ]] || { echo "$container is not running"; return 1; }
+  pid="${state#true }"
+  [[ -n "$pid" && "$pid" != "0" ]] || { echo "$container is not running"; return 1; }
+
+  want="$(docker network inspect "$network" -f '{{(index .IPAM.Config 0).Gateway}}' 2>&1)" && rc=0 || rc=$?
+  [[ "$rc" -eq 0 && -n "$want" ]] || { echo "could not read $network's gateway address: $want"; return 2; }
+
+  route="$(nsenter -t "$pid" -n ip -4 route show default 2>&1)" && rc=0 || rc=$?
+  [[ "$rc" -eq 0 ]] || { echo "could not read $container's routes: $route"; return 2; }
+  [[ -n "$route" ]] || { echo "could not read $container's routes: no default route in its namespace"; return 2; }
+
+  case "$route" in
+    "default via $want "*) echo "$route"; return 0 ;;
+    *) echo "$route (want via $want, the $network network's gateway)"; return 3 ;;
+  esac
+}

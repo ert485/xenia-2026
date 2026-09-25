@@ -38,16 +38,13 @@ case "${1:-}" in
       echo "imds guard: MISSING (systemctl restart xenia-imds-guard)"
     fi
     echo "kit: $(git -C "$KIT_ON_BOX" rev-parse --short HEAD) ($KIT_REF)"
-    if docker inspect gateway-caddy-1 >/dev/null 2>&1; then
-      gw_addr="$(docker network inspect gateway -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo '?')"
-      caddy_route="$(docker exec gateway-caddy-1 ip route 2>/dev/null | head -1 || echo '?')"
-      case "$caddy_route" in
-        "default via $gw_addr "*) echo "caddy default route: ok ($caddy_route)" ;;
-        *) echo "caddy default route: MISMATCH (want via $gw_addr, got '$caddy_route') — DNS-01/instance-role traffic is being dropped by the IMDS guard" ;;
-      esac
-    else
-      echo "caddy default route: gateway-caddy-1 not running"
-    fi
+    route_msg="$(gateway_route_check gateway-caddy-1 gateway)" && route_rc=0 || route_rc=$?
+    case "$route_rc" in
+      0) echo "caddy default route: ok ($route_msg)" ;;
+      1) echo "caddy default route: cannot check ($route_msg)" ;;
+      2) echo "caddy default route: cannot check ($route_msg)" ;;
+      3) echo "caddy default route: MISMATCH ($route_msg) — DNS-01/instance-role traffic is being dropped by the IMDS guard" ;;
+    esac
     docker compose ls --all
     docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
     ;;

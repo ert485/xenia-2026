@@ -46,18 +46,20 @@ docker compose ps --format 'table {{.Name}}\t{{.Status}}'
 # Caddy must default-route via the gateway network's gw0, or its DNS-01/instance-role traffic is
 # dropped by the IMDS guard (Task 6 review carry). `gw_priority` needs Docker Engine >= 28 (see the
 # comment in compose.yml); the box's AL2023 `docker` package is unpinned, so this is asserted, not
-# assumed. A short retry loop covers the gap between `up -d` returning and the container's network
-# namespace being fully set up.
-gw_addr="$(docker network inspect gateway -f '{{(index .IPAM.Config 0).Gateway}}')"
-caddy_route=""
+# assumed. gateway_route_check (box/lib.sh) reads the route from the HOST namespace via nsenter —
+# not `docker exec ... ip route`, which always fails on the pinned Caddy image (no `ip` in it) and
+# would otherwise be misread as an empty/missing route. A short retry loop covers the "not running
+# yet" outcome (rc 1) for the gap between `up -d` returning and the container starting; the other
+# two outcomes (rc 2 tool/namespace error, rc 3 a real route mismatch) fail immediately.
+msg="" rc=0
 for _ in $(seq 1 15); do
-  caddy_route="$(docker exec gateway-caddy-1 ip route 2>/dev/null | head -1 || true)"
-  [[ -n "$caddy_route" ]] && break
+  msg="$(gateway_route_check gateway-caddy-1 gateway)" && rc=0 || rc=$?
+  [[ "$rc" -eq 1 ]] || break
   sleep 1
 done
-[[ -n "$caddy_route" ]] || die "gateway-caddy-1 never came up to check its default route"
-log "caddy default route: $caddy_route (gateway network gw0 address: $gw_addr)"
-case "$caddy_route" in
-  "default via $gw_addr "*) : ;;
-  *) die "caddy's default route is not via the gateway network ($gw_addr); got '$caddy_route' — its DNS-01/instance-role traffic would be dropped by the IMDS guard. Check gw_priority/priority in compose.yml and the box's Docker Engine version." ;;
+case "$rc" in
+  0) log "caddy default route: ok ($msg)" ;;
+  1) die "caddy never came up to check its default route: $msg" ;;
+  2) die "could not check caddy's default route: $msg" ;;
+  3) die "caddy's default route is wrong: $msg — its DNS-01/instance-role traffic would be dropped by the IMDS guard. Check gw_priority/priority in compose.yml and the box's Docker Engine version." ;;
 esac
