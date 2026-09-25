@@ -1,0 +1,66 @@
+{
+  "name": "xenia sandbox",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "..",
+    "cacheFrom": "ghcr.io/ert485/xenia-2026-devcontainer:main",
+    "args": {
+      "TZ": "${localEnv:TZ:America/Regina}"
+    }
+  },
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "eamodio.gitlens",
+        "hashicorp.terraform"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.codeActionsOnSave": {
+          "source.fixAll.eslint": "explicit"
+        },
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.profiles.linux": {
+          "bash": {
+            "path": "bash",
+            "icon": "terminal-bash"
+          },
+          "zsh": {
+            "path": "zsh"
+          }
+        }
+      }
+    }
+  },
+  "remoteUser": "node",
+  "mounts": [
+    "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
+    "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume"
+  ],
+  "containerEnv": {
+    "NODE_OPTIONS": "--max-old-space-size=4096",
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
+    "POWERLEVEL9K_DISABLE_GITSTATUS": "true"
+  },
+  "secrets": {
+    "GATEWAY_KEY": {
+      "description": "Teammate: your personal gateway key (starts with sk-), sent to you by direct message. Never paste it into a channel."
+    },
+    "DISCORD_WEBHOOK_URL": {
+      "description": "Teammate: the team channel's webhook URL, so /notify can post for your agent. Optional."
+    }
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace",
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && (setsid nohup bash -c 'while sleep 900; do sudo /usr/local/bin/refresh-firewall.sh; done' >/tmp/refresh-firewall.log 2>&1 &)",
+  "waitFor": "postStartCommand"
+}

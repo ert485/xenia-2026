@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "xenia": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "xenia gateway",
+      "options": {
+        "baseURL": "https://llm.26.cohack.tetl.ca/v1",
+        "apiKey": "{env:ANTHROPIC_AUTH_TOKEN}"
+      },
+      "models": {
+        "qwen3-coder": {
+          "name": "Qwen3 Coder 30B (team model)"
+        }
+      }
+    }
+  },
+  "model": "xenia/qwen3-coder"
+}

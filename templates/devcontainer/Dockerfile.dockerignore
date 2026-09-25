@@ -1,0 +1,4 @@
+**
+!plugin/
+!.devcontainer/init-firewall.sh
+!.devcontainer/refresh-firewall.sh
