@@ -22,8 +22,10 @@ Two rules, fixed on Friday:
   It is meant to be recklessly fast inside: no permission prompts, a hard deny on the few ruinous commands, and nothing
   inside worth exfiltrating beyond a per-container gateway key with a small budget.
 - **No agent holds deploy credentials.** The gate is a deterministic executor plus a human yes: CI on a merge to `main`
-  (OIDC, Task 9), the broker's yes or no per command, Erik for every `terraform apply`. It acts on the verified commit
-  and nothing else.
+  (OIDC, Task 9) for the team's app, apply-on-merge (Task 30) or any member's own Identity Center session (spec D22's
+  opt-in) for the team's infrastructure, the broker's yes or no per command for unattended kit work, and Erik only for
+  the kit's own stacks (`infra/org`, `infra/platform`, the recipes). Erik is not in the path of a team deploy. The gate
+  acts on the verified commit and nothing else.
 
 The Mac only does work that needs a credential. It runs a small broker, not a Claude session, that shows each
 credentialed request from the container and runs it only after Erik says yes. A Mac Claude Code session is only needed
@@ -149,4 +151,4 @@ On the Mac, in `~/Code/xenia-2026`:
 
 > Read `docs/superpowers/plans/2026-09-25-container-first-workflow.md` and the SDD ledger it points to. Execute Task 32
 > with superpowers:subagent-driven-development, then resume the ledger at Task 11, carrying the steps this plan folds
-> into Tasks 11, 14, 18 and 26. Every `terraform apply` is mine to approve.
+> into Tasks 11, 14, 18 and 26. Every `terraform apply` of the kit's own stacks is mine to approve.
