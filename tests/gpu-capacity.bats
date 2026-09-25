@@ -48,8 +48,10 @@ EOF
   run scripts/gpu.sh capacity-log
   [ "$status" -eq 0 ]
   [[ "$output" == *"g6e.xlarge us-east-1a: AVAILABLE"* ]]
-  [[ "$output" == *"g6e.xlarge us-east-1a          1/2"* ]]
-  [[ "$output" == *"g6e.2xlarge us-east-1b         0/1"* ]]
+  # The summary's column padding is cosmetic (printf %-24s); match the counts without pinning the
+  # exact number of spaces, which is not portable to check character-by-character across awk builds.
+  [[ "$output" == *"g6e.xlarge us-east-1a"*"1/2"* ]]
+  [[ "$output" == *"g6e.2xlarge us-east-1b"*"0/1"* ]]
   grep -q 'xenia-gpu-capacity-probe' "$AWS_CALLS"
 }
 
