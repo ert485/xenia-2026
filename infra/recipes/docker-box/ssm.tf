@@ -5,3 +5,10 @@ resource "aws_ssm_document" "gateway" {
   document_format = "YAML"
   content         = file("${path.module}/ssm/gateway.yaml")
 }
+
+resource "aws_ssm_document" "deploy" {
+  name            = "xenia-deploy"
+  document_type   = "Command"
+  document_format = "YAML"
+  content         = file("${path.module}/ssm/deploy.yaml")
+}
