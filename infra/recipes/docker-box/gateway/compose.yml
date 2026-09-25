@@ -1,0 +1,81 @@
+# Gateway compose project on the Docker box. Started by start.sh, never by hand, because start.sh
+# writes the env files from SSM first. The master key reaches only the litellm container (D36).
+name: gateway
+
+services:
+  caddy:
+    build:
+      context: .
+      dockerfile: caddy.Dockerfile
+    image: xenia-caddy:local
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ZONE: ${ZONE:?ZONE comes from /etc/xenia.env}
+      APP_PORT: ${APP_PORT:-3000}
+      AWS_REGION: ca-central-1
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      gateway:
+        # connected first, so its default route (and the instance role, for DNS-01) is via gw0.
+        # gw_priority is the Docker 28 / Compose 2.30+ way to pin the container's default gateway to
+        # a specific network attachment; the box installs Compose v2.39.2 (VERSIONS.md), which
+        # supports it. If a future box image ever downgrades below that, fall back to `priority`
+        # instead (older, DNS-search-order only, does not affect the default route).
+        gw_priority: 100
+      edge: {}
+
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.102.1@sha256:87f34979b9f8cb274fac90ca8a4fdda07d8480de22755562a26adeb95ce20d02
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "2"]
+    env_file:
+      - /run/xenia/litellm.env
+    environment:
+      AWS_REGION: us-east-1
+    volumes:
+      - ./litellm.config.yaml:/app/config.yaml:ro
+      - /run/xenia/certs:/certs:ro
+    # Loopback only: scripts/gateway-key.sh reaches the key API through an SSM port-forward.
+    ports:
+      - "127.0.0.1:4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - gateway
+
+  postgres:
+    image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+    restart: unless-stopped
+    env_file:
+      - /run/xenia/postgres.env
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_DB: litellm
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - gateway
+
+networks:
+  gateway:
+    external: true
+  edge:
+    external: true
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}
+  pgdata: {}

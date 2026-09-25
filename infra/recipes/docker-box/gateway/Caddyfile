@@ -1,0 +1,52 @@
+# Caddy on the Docker box. ZONE and APP_PORT come from /etc/xenia.env via compose.
+# Three certificates in total (app., llm., the *.box. wildcard), all by DNS-01, so previews never
+# mint new certificates (spec section 6).
+{
+	admin off
+}
+
+(dns01) {
+	tls {
+		dns route53
+		resolvers 1.1.1.1 8.8.8.8
+	}
+}
+
+app.{$ZONE} {
+	import dns01
+	reverse_proxy app-web:{$APP_PORT}
+}
+
+# Only inference and the unauthenticated health paths are public (deviation 6). The admin UI and the
+# key-management routes answer 404 here; keys are issued over an SSM port-forward (deviation 8).
+llm.{$ZONE} {
+	import dns01
+	@allowed path /v1/messages /v1/messages/* /v1/chat/completions /v1/models /health/liveliness /health/readiness
+	handle @allowed {
+		reverse_proxy litellm:4000 {
+			flush_interval -1
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 600s
+			}
+		}
+	}
+	handle {
+		respond 404
+	}
+}
+
+*.box.{$ZONE} {
+	import dns01
+	@pr header_regexp pr Host ^pr-([0-9]+)\.box\.
+	handle @pr {
+		reverse_proxy pr-{re.pr.1}-web:{$APP_PORT}
+	}
+	handle {
+		respond "no such preview" 404
+	}
+	# A closed preview has no container, so the upstream lookup fails with 502: say so plainly.
+	handle_errors 502 {
+		respond "no such preview" 404
+	}
+}
