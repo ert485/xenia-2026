@@ -25,6 +25,6 @@ variable "alert_email" {
   type        = string
 }
 variable "alert_sms" {
-  description = "Gateway health alarm SMS, E.164, verified in the member account's us-east-1 SMS sandbox (Task 7)"
+  description = "Gateway health alarm SMS, E.164, verified in the member account's ca-central-1 SMS sandbox (Task 7; us-east-1 has no SMS origination identity in this account)"
   type        = string
 }

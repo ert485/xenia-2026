@@ -9,3 +9,7 @@ output "gateway_alarm_topic_arn" {
   value     = aws_sns_topic.gateway_alarm.arn
   sensitive = true
 }
+output "gateway_alarm_sms_topic_arn" {
+  value     = aws_sns_topic.gateway_alarm_sms.arn
+  sensitive = true
+}
