@@ -18,7 +18,7 @@ setup() {
 case "\$1 \$2" in
   "sts get-caller-identity") printf '%s\n' "$MEMBER_ID" ;;
   "ec2 describe-instances")  printf 'i-0123456789abcdef0\n' ;;
-  "ssm get-parameter")       printf 'sk-testmasterkeytestmasterkeytest\n' ;;
+  "ssm get-parameter")       printf 'sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n' ;;
   "ssm start-session")
     # Simulate aws ssm start-session spawning session-manager-plugin as a child: the child (a
     # long sleep) inherits this process's process group, same as the real pair does.
