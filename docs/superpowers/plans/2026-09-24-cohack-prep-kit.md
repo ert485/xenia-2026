@@ -96,6 +96,7 @@ Each preserves the spec's intent and its section 17 test. Erik reads these first
 11. **Terraform runs as the `cohack` Identity Center profile, not through `OrganizationAccountAccessRole`.** Spec §5 mentions that role for the bootstrap; the profile Erik already has does the same job with a shorter-lived session, so the role stays unused.
 12. **The team infra role's instance-type allow-list can't see inside launch templates or fleets** (Task 30, D39). IAM checks `ec2:InstanceType` on `RunInstances` and `ec2:Attribute/InstanceType` on `ModifyInstanceAttribute`, but no condition key exposes the type inside a launch template, EC2 Fleet, Spot Fleet, or Spot request. So instead of "deny those for types outside the list", the infra role is denied those launch paths outright; `aws_instance` works. Managed services that start their own instances (EKS node groups, Batch, EMR, SageMaker) are not covered; the budget alerts are the backstop. The spec's §7 says the same.
 13. **`infra/org` imports the organization to enable SCPs** (Task 14, D40). Terraform enables a policy type only through `aws_organizations_organization`, so the hand-made organization is imported with `prevent_destroy` and `ignore_changes` on trusted access and the feature set: an apply can add the SCP policy type and nothing else. Runbook 99 removes it from state before `teardown.sh --all`.
+14. **`CODEOWNERS` owns only the rules files, not the wider blast-radius set** (Erik's decision, 2026-09-24). `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, and `CODEOWNERS` itself are the only code-owned paths; `.github/workflows/`, `.devcontainer/`, the vendored plugin, `Makefile`, compose files, and `infra/team/**` all self-merge once `make check` and shutdown coverage pass. Rules edits are rare and a team agreement, worth a second reviewer; the other paths change often mid-event as agents fix CI, and a second-owner gate there added little given every member's near-admin AWS access. The residual risk (an agent tricked into leaking the gateway CI key or the Discord webhook) is covered by per-key budgets, one-step rotation, `gitleaks`, fork skip, and the reviewer ranking CI/secrets changes as a finding.
 
 ## Review Focus
 
@@ -6593,18 +6594,16 @@ and the bot's consistency review is there to catch it.
 ```text
 # Code owners: the two or three teammates named at idea lock. Any one owner approves a change to these
 # paths; an owner's own PR needs a different owner, because GitHub never lets an author approve their
-# own PR. Everything else self-merges once CI is green (P-two-gates).
+# own PR. Everything else self-merges once CI is green (P-two-gates). Owned set is the rules files
+# only (Erik's decision, 2026-09-24): rules edits are rare and a team agreement worth a second
+# reviewer; workflows, the dev container, the plugin, Makefile, and compose files change often
+# mid-event as agents fix CI, and a second-owner gate there added little given every member's
+# near-admin AWS access. The residual risk (an agent leaking the gateway CI key or the Discord
+# webhook) is covered by per-key budgets, one-step rotation, gitleaks, fork skip, and the reviewer
+# ranking CI/secrets changes as a finding.
 /PRINCIPLES.md            @OWNER1 @OWNER2
 /PRINCIPLES-EXTENDED.md   @OWNER1 @OWNER2
 /CODEOWNERS               @OWNER1 @OWNER2
-/.github/workflows/       @OWNER1 @OWNER2
-/.devcontainer/           @OWNER1 @OWNER2
-/plugin/                  @OWNER1 @OWNER2
-/Makefile                 @OWNER1 @OWNER2
-compose*.yml              @OWNER1 @OWNER2
-compose*.yaml             @OWNER1 @OWNER2
-docker-compose*.yml       @OWNER1 @OWNER2
-docker-compose*.yaml      @OWNER1 @OWNER2
 ```
 
 `templates/team-repo/ruleset.json`:
@@ -6838,18 +6837,13 @@ Teammate: this is how we work. The why is in `PRINCIPLES.md` and `PRINCIPLES-EXT
 `.github/CODEOWNERS` (the kit's own; its principles live under `team-kit/`, and nothing here is enforced by a ruleset on the kit repo, it only requests Erik's review):
 
 ```text
-# Kit code owner. The kit repo has one maintainer; this marks the blast-radius paths for review requests.
+# Kit code owner. The kit repo has one maintainer; this marks the rules files for review requests.
+# Narrowed to match the team-repo template (Erik's decision, 2026-09-24): only the rules files ask
+# for review; workflows, dev container, plugin, Makefile, and compose files change too often mid-event
+# to gate behind a review request.
 /team-kit/PRINCIPLES.md            @ert485
 /team-kit/PRINCIPLES-EXTENDED.md   @ert485
 /.github/CODEOWNERS                @ert485
-/.github/workflows/                @ert485
-/.devcontainer/                    @ert485
-/plugin/                           @ert485
-/Makefile                          @ert485
-compose*.yml                       @ert485
-compose*.yaml                      @ert485
-docker-compose*.yml                @ert485
-docker-compose*.yaml               @ert485
 ```
 
 ```bash
@@ -10145,13 +10139,23 @@ gh pr checks --watch && gh pr merge --squash --delete-branch
 ```
 Expected: both required checks pass and the merge succeeds with no review.
 
+```bash
+git switch main && git switch -c workflow-edit
+printf '\n# comment (ruleset proof)\n' >> .github/workflows/check.yml
+git add .github/workflows/check.yml && git commit -qm "Workflow comment (ruleset proof)"
+git push -q -u origin workflow-edit
+gh pr create --title "Ruleset proof: workflow edit self-merges" --body "$(printf "Proves .github/workflows/ is no longer code-owned (Erik's decision, 2026-09-24): only the rules files (PRINCIPLES.md, PRINCIPLES-EXTENDED.md, CODEOWNERS) require a second owner.\n\nRule-feedback: none\nShutdown: none needed because only a comment changes\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")"
+gh pr checks --watch && gh pr merge --squash --delete-branch
+```
+Expected: both required checks pass (and `pr-review` may comment) and the merge succeeds with no owner review, confirming `.github/workflows/` self-merges under the narrowed `CODEOWNERS`.
+
 Offboarding a collaborator: Erik has one GitHub account. If a friend has agreed to lend a handle for five minutes, invite them with step 9's command, run `scripts/offboard-teammate.sh <any-onboarded-test-email> --github <their-handle>`, and show `gh api repos/ert485/xenia-test-team/invitations --jq length` drop to `0` and `gh api repos/ert485/xenia-test-team/collaborators --jq '.[].login'` list only `ert485`. Without a second handle, record "one-account limitation: the collaborator-removal path is covered by `tests/teammates.bats` only".
 
 Keep `ert485/xenia-test-team` until Sunday (the Saturday rehearsal and Task 22 use it), then `gh repo delete ert485/xenia-test-team --yes` and remove it from the two allow-lists by PR.
 
 - [ ] **Step 8: Record the proof and commit**
 
-Write `docs/proofs/2026-09-25-onboard-repo.md` with the `time` of the first run, the second run's "already" lines, the `security_and_analysis` JSON, the two PR URLs with the refusal text and the successful merge, and the offboarding result or the one-account limitation. Run `scripts/ci/leak-check.sh docs/proofs/2026-09-25-onboard-repo.md` (expect no output), then:
+Write `docs/proofs/2026-09-25-onboard-repo.md` with the `time` of the first run, the second run's "already" lines, the `security_and_analysis` JSON, the three PR URLs (the blocked `PRINCIPLES.md` edit, the ordinary-file self-merge, and the `.github/workflows/` self-merge) with the refusal text and the two successful merges, and the offboarding result or the one-account limitation. Run `scripts/ci/leak-check.sh docs/proofs/2026-09-25-onboard-repo.md` (expect no output), then:
 
 ```bash
 cd ~/Code/xenia-2026
@@ -12414,7 +12418,7 @@ Expected: within about three minutes the `OK` notification arrives by SMS and em
 
 Steps 14 to 17 rehearse Saturday on `ert485/xenia-test-team` (onboarded in Task 17, kept until Sunday). The kit's own deploy was proven in Task 9; this proves the path a real team takes: the team repo's own deploy role (its immutable OIDC prefix written by `onboard-repo.sh`), its own ECR repository, and its own merge. The team app **replaces the kit's hello example on `app.`**; that is expected on Friday, and step 20 takes `app.` down anyway.
 
-One-account limitation: the test repo's only code owner is Erik, compose files and `.github/workflows/` are code-owned (Task 12 `CODEOWNERS`), and GitHub never lets an author approve their own PR, so a PR touching them can't merge. For the rehearsal only, switch the ruleset off around such a merge and back on straight after; the spec already says the admin can do this outside git (honour system). Record each use in the proof file.
+One-account limitation: the test repo's only code owner is Erik, and GitHub never lets an author approve their own PR, so a PR touching an owned path can't merge on its own. Since `CODEOWNERS` now owns only the rules files (Erik's decision, 2026-09-24: `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, `CODEOWNERS` itself), this only bites a `PRINCIPLES.md`-touching PR; compose files and `.github/workflows/` self-merge like any other path. The `ruleset` helper below stays for that one case, if this rehearsal touches the rules files at all — the app and infra merges in the rest of this task don't need it.
 
 ```bash
 ruleset() {  # ruleset <owner/repo> active|disabled
@@ -12439,13 +12443,11 @@ git push -q -u origin add-app
 gh variable set APP_DIR --body app --repo "$team"
 gh pr create --title "Rehearsal: first app" --body "$(printf 'The first team app, to prove a merge reaches app.\n\nRule-feedback: none\nShutdown: none needed because the app runs on the kit Docker box, which shutdown.d/20-docker-box.sh already stops\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
 gh pr checks --watch
-ruleset "$team" disabled
 date -u +%T && gh pr merge --squash --delete-branch
-ruleset "$team" active
 gh run watch "$(gh run list --repo "$team" --workflow deploy-docker-box.yml -L 1 --json databaseId --jq '.[0].databaseId')" --repo "$team"
 date -u +%T && curl -sI https://app.26.cohack.tetl.ca | head -1 && curl -s https://app.26.cohack.tetl.ca
 ```
-Expected: `check` and `shutdown-coverage` green; `ruleset` prints `disabled`, then `active`; the preview for this PR comes up too (step 15 checks previews on its own PR). The `deploy-docker-box` run on the team repo assumes `xenia-deploy-ert485-xenia-test-team` (an OIDC failure here means the sub prefix in `oidc-sub-prefixes.auto.tfvars.json` is wrong), builds on `ubuntu-24.04-arm`, pushes to `xenia/xenia-test-team`, and ends `deploy status: Success`. `curl -sI` prints `HTTP/2 200` and the body shows `sha:` equal to the team repo's merge commit. The two `date` lines are under five minutes apart. Proof file line (`docs/proofs/2026-09-25-team-rehearsal.md`): `Criterion 1 from a team repo: merge <time>, 200 at <time>, <n> min <s> s, run <URL>; ruleset toggled once (one-account limitation)`.
+Expected: `check` and `shutdown-coverage` green; the merge succeeds with no owner review, since `app/` and its compose file aren't code-owned; the preview for this PR comes up too (step 15 checks previews on its own PR). The `deploy-docker-box` run on the team repo assumes `xenia-deploy-ert485-xenia-test-team` (an OIDC failure here means the sub prefix in `oidc-sub-prefixes.auto.tfvars.json` is wrong), builds on `ubuntu-24.04-arm`, pushes to `xenia/xenia-test-team`, and ends `deploy status: Success`. `curl -sI` prints `HTTP/2 200` and the body shows `sha:` equal to the team repo's merge commit. The two `date` lines are under five minutes apart. Proof file line (`docs/proofs/2026-09-25-team-rehearsal.md`): `Criterion 1 from a team repo: merge <time>, 200 at <time>, <n> min <s> s, run <URL>; no ruleset toggle needed (app/ and compose files aren't code-owned)`.
 
 - [ ] **Step 15: Team-repo rehearsal, part 2: a preview from the team repo**
 
@@ -12465,7 +12467,7 @@ Expected: a URL comment naming `https://pr-<n>.box.26.cohack.tetl.ca`; `HTTP/2 2
 
 - [ ] **Step 16: Team-repo rehearsal, part 3: team infrastructure by PR (only if Task 30 has landed)**
 
-If `templates/workflows/terraform-apply.yml` is not on the kit's `main`, write `Team infra: not rehearsed (Task 30 not landed)` in the proof file and go to step 17. Otherwise run Task 30 step 13 (a) to (c) on the same repo: a PR adding a tagged `t4g.nano` under `infra/team/` gets one plan comment with counts and addresses only, masked, and merging applies it; a PR removing it stops at the destroy gate and posts to Discord, `destroy-ok` plus a re-run destroys it and posts the completion; a PR adding an `m7i.8xlarge` fails at apply with `UnauthorizedOperation` from the instance-type allow-list. The `kit-sync` PR that brings the two workflows touches `.github/workflows/`, so it needs the `ruleset` toggle from step 14. Proof file lines: the three PR URLs, the plan-comment count lines, the three Discord message first lines, and the `UnauthorizedOperation` line; Task 30's own proof file gets the full record.
+If `templates/workflows/terraform-apply.yml` is not on the kit's `main`, write `Team infra: not rehearsed (Task 30 not landed)` in the proof file and go to step 17. Otherwise run Task 30 step 13 (a) to (c) on the same repo: a PR adding a tagged `t4g.nano` under `infra/team/` gets one plan comment with counts and addresses only, masked, and merging applies it; a PR removing it stops at the destroy gate and posts to Discord, `destroy-ok` plus a re-run destroys it and posts the completion; a PR adding an `m7i.8xlarge` fails at apply with `UnauthorizedOperation` from the instance-type allow-list. The `kit-sync` PR that brings the two workflows touches `.github/workflows/`, which self-merges like any other path now that `CODEOWNERS` owns only the rules files, so no ruleset toggle is needed. Proof file lines: the three PR URLs, the plan-comment count lines, the three Discord message first lines, and the `UnauthorizedOperation` line; Task 30's own proof file gets the full record.
 
 - [ ] **Step 17: Team-repo rehearsal, part 4: the access kill switch on the live setup (spec D40)**
 
@@ -12831,7 +12833,7 @@ From the team repo root:
     make types
     git add contracts src/contracts .github/workflows/contract-check.yml
 
-Open a PR. `.github/workflows/` is a code-owned path, so an owner other than the author approves it.
+Open a PR. `.github/workflows/` isn't code-owned (only `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, and `CODEOWNERS` are), so it self-merges once `make check` and shutdown coverage pass.
 
 ## What the check does on every PR
 
@@ -13967,8 +13969,10 @@ Teammate: fill these in at the 11:30 architecture checkpoint and keep them curre
 - Agent: never create, edit, or commit `.devcontainer/ai.local.env` or any other `*.local.env` file.
 - Agent: never run with AWS credentials. Ship by pushing a branch; CI deploys (C11). If a task seems to need
   AWS access, stop and ask the teammate.
-- Agent: never edit `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, `CODEOWNERS`, `.github/workflows/`, or
-  `.devcontainer/` unless the teammate asked for exactly that change; those paths need an owner's approval.
+- Agent: never edit `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, or `CODEOWNERS` unless the teammate asked
+  for exactly that change; those are the only paths that need a different owner's approval (Erik's
+  decision, 2026-09-24). `.github/workflows/` and `.devcontainer/` self-merge behind `make check` and
+  shutdown coverage, but still get flagged by the reviewer as a CI/secrets-handling change worth a look.
 - Agent: never post to the team channel or open an issue for `/pain` or `/rule-feedback` before the teammate
   confirms the wording.
 - Agent: after fifteen minutes of looping with no progress, stop and hand back to the teammate (P-wheel).
@@ -14217,7 +14221,7 @@ git add -A && git commit -m "Refresh team templates from the kit" && git push -u
 gh pr create --title "Refresh team templates" --body "$(printf 'Template refresh from the kit.\n\nRule-feedback: none\nShutdown: none needed because docs and Makefile only\n')"
 make preview-url
 ```
-Expected: `make check` prints `check: no project yet ...` (the test repo has no app); the last `make preview-url` prints `https://pr-<n>.box.26.cohack.tetl.ca`. The `Makefile` is a code-owned path, so this PR shows "review required" for the single owner; that is the ruleset working (Task 17), not a failure. Close the PR unmerged. Record the output and the time in `docs/proofs/2026-09-25-team-repo-templates.md` (redact with `scripts/ci/leak-check.sh docs/proofs` before committing).
+Expected: `make check` prints `check: no project yet ...` (the test repo has no app); the last `make preview-url` prints `https://pr-<n>.box.26.cohack.tetl.ca`. `Makefile` isn't a code-owned path (only the rules files are, since v2.6), so this PR needs no owner review, just green checks — that's the ruleset working as narrowed (Task 17), not a failure. Close the PR unmerged (it's a throwaway refresh, not meant to land). Record the output and the time in `docs/proofs/2026-09-25-team-repo-templates.md` (redact with `scripts/ci/leak-check.sh docs/proofs` before committing).
 
 - [ ] **Step 10: Commit and open the PR**
 
@@ -16754,8 +16758,9 @@ and after the `sed -i.bak "s|@OWNER1 @OWNER2|$owners_space|g" CODEOWNERS` line (
 ```bash
 mkdir -p .github/kit
 cp "$KIT_ROOT/scripts/ci/plan-gate.sh" "$KIT_ROOT/scripts/ci/plan-notify.sh" .github/kit/
-# The destroy gate lives outside .github/workflows/, so it gets its own code-owner line.
-printf '/.github/kit/ %s\n' "$owners_space" >> CODEOWNERS
+# No code-owner line for .github/kit/: it's workflow-adjacent (the destroy gate scripts), and the
+# owned set is the rules files only (Erik's decision, 2026-09-24) — it self-merges like the rest
+# of .github/workflows/.
 if [[ ! -d infra/team ]]; then
   mkdir -p infra && cp -R "$KIT_ROOT/infra/examples/team-stack" infra/team
   rm -rf infra/team/.terraform infra/team/.terraform-validate   # the kit's local `make validate` leftovers
@@ -16844,7 +16849,7 @@ Uses `ert485/xenia-test-team` from Task 17 (kept until Sunday). Needs `DISCORD_W
 ```bash
 scripts/onboard-repo.sh ert485/xenia-test-team --owners @ert485
 ```
-Expected: the apply shows `No changes` (step 12 created the roles); step 3 pushes a `kit-sync-*` branch (the ruleset exists by now): open and merge its PR (it touches `.github/workflows/`, which is code-owned, so on this one-owner test repo use the `ruleset` toggle from Task 22 step 14 around the merge), which adds `.github/workflows/terraform-{plan,apply}.yml`, `.github/kit/`, and `infra/team/`; step 8 sets `AWS_PLAN_ROLE_ARN`, `AWS_INFRA_ROLE_ARN`, and `TF_STATE_BUCKET`. That merge touches `infra/team/**`, so `terraform-apply` runs once: expected `plan: 0 to add, 0 to change, 0 to destroy`, `gate: no deletes or replaces`, `nothing to apply`.
+Expected: the apply shows `No changes` (step 12 created the roles); step 3 pushes a `kit-sync-*` branch (the ruleset exists by now): open and merge its PR (it touches `.github/workflows/`, but `CODEOWNERS` owns only the rules files now, so it self-merges with no ruleset toggle), which adds `.github/workflows/terraform-{plan,apply}.yml`, `.github/kit/`, and `infra/team/`; step 8 sets `AWS_PLAN_ROLE_ARN`, `AWS_INFRA_ROLE_ARN`, and `TF_STATE_BUCKET`. That merge touches `infra/team/**`, so `terraform-apply` runs once: expected `plan: 0 to add, 0 to change, 0 to destroy`, `gate: no deletes or replaces`, `nothing to apply`.
 
 a. **Add a tagged `t4g.nano`.**
 
