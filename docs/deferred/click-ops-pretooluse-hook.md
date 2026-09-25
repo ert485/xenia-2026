@@ -19,7 +19,7 @@ containers hold no AWS credentials, so an agent's `aws` call fails on its own.
 
 No AWS credentials in agent containers (C11, D22); deploys go through CI with OIDC. Terraform default tags mark
 everything the kit creates, and `scripts/untagged.sh` (Task 28) lists anything without tags. Console work that
-had to happen gets a `Rule-feedback:` line so it can be imported or destroyed later.
+had to happen gets a `Rule-feedback: P-no-clickops, ...` line so it can be imported or destroyed later.
 
 ## How to revive
 
