@@ -67,10 +67,13 @@ fi
 
 if [[ "$action" == "capacity-log" ]]; then
   n="${2:-50}"
-  aws_cap() { aws --profile cohack --region us-east-1 "$@"; }
+  # /xenia/boxes lives in ca-central-1 (infra/platform, the kit's platform region) — a different
+  # region from the us-east-1 EC2 capacity probing above, so this uses its own region.
+  log_region=ca-central-1
+  aws_cap() { aws --profile cohack --region "$log_region" "$@"; }
   lines="$(aws_cap logs filter-log-events --log-group-name /xenia/boxes \
     --log-stream-names xenia-gpu-capacity-probe --query 'events[].message' --output text 2>/dev/null)" \
-    || die "could not read /xenia/boxes (profile cohack, us-east-1)"
+    || die "could not read /xenia/boxes (profile cohack, $log_region)"
   lines="$(tail -n "$n" <<< "$lines")"
   [[ -n "$lines" ]] || die "no xenia-gpu-capacity-probe log lines found in /xenia/boxes yet"
   printf '%s\n' "$lines"

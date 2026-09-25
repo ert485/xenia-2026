@@ -21,11 +21,17 @@ source "$here/lib.sh"
 load_box_env
 
 region=us-east-1
+# The capacity reservations this script probes only exist in us-east-1, but the CloudWatch log
+# group it ships lines to (/xenia/boxes) lives in ca-central-1 (infra/platform, the kit's platform
+# region) — a separate region from the EC2 calls above, so `logs` calls get their own region var
+# instead of reusing $region.
+log_region="${LOG_REGION:-ca-central-1}"
 log_group=/xenia/boxes
 log_stream=xenia-gpu-capacity-probe
 types=(g6e.xlarge g6e.2xlarge)
 
 aws_() { aws --region "$region" "$@"; }
+logs_() { aws --region "$log_region" logs "$@"; }
 
 declare -a log_buf=()
 
@@ -40,13 +46,20 @@ probe_log() {
 
 ship_logs() {
   [[ ${#log_buf[@]} -gt 0 ]] || return 0
-  aws_ logs create-log-stream --log-group-name "$log_group" --log-stream-name "$log_stream" >/dev/null 2>&1 || true
+  # create-log-stream fails with ResourceAlreadyExistsException on every run after the first, which
+  # is expected and not worth reporting; any other failure (permissions, wrong region, etc.) is
+  # reported below instead of being swallowed into /dev/null.
+  local create_out create_rc=0
+  create_out="$(logs_ create-log-stream --log-group-name "$log_group" --log-stream-name "$log_stream" 2>&1)" || create_rc=$?
+  if [[ "$create_rc" -ne 0 && "$create_out" != *ResourceAlreadyExistsException* ]]; then
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ALERT: could not create CloudWatch log stream ($log_group/$log_stream): $create_out" >&2
+  fi
   local events="[]" now line
   now="$(($(date +%s) * 1000))"
   for line in "${log_buf[@]}"; do
     events="$(jq -c --arg m "$line" --argjson t "$now" '. + [{timestamp: $t, message: $m}]' <<< "$events")"
   done
-  aws_ logs put-log-events --log-group-name "$log_group" --log-stream-name "$log_stream" \
+  logs_ put-log-events --log-group-name "$log_group" --log-stream-name "$log_stream" \
     --log-events "$events" >/dev/null \
     || echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ALERT: could not ship probe log lines to CloudWatch ($log_group/$log_stream)" >&2
 }

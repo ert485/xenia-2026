@@ -53,6 +53,8 @@ EOF
   [[ "$output" == *"g6e.xlarge us-east-1a"*"1/2"* ]]
   [[ "$output" == *"g6e.2xlarge us-east-1b"*"0/1"* ]]
   grep -q 'xenia-gpu-capacity-probe' "$AWS_CALLS"
+  # /xenia/boxes lives in ca-central-1 (infra/platform), not the us-east-1 EC2 capacity region
+  grep -q -- '--profile cohack --region ca-central-1 logs filter-log-events' "$AWS_CALLS"
 }
 
 @test "capacity-log: no log lines yet is a clear error, not a silent empty summary" {
