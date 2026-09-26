@@ -17,7 +17,7 @@ setup() {
   rm -rf "$PROJ/contracts"
   run make -s -C "$PROJ" -f "$MK" types
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no contracts/openapi.yaml"* ]]
+  [[ "$output" == *"no contracts/openapi.yaml"* ]] || return 1
   [ ! -s "$CALLS" ]
 }
 

@@ -59,7 +59,7 @@ rulesets API replaces a ruleset with `PUT`, so read it, add the context, and wri
       | jq '{name, target, enforcement, bypass_actors, conditions, rules}
             | (.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks)
               += [{"context": "contract-check"}]' \
-      | gh api -X PUT "repos/$repo/rulesets/$id" --
+      | gh api -X PUT "repos/$repo/rulesets/$id" --input -
 
 The workflow runs on every PR (it has no `paths:` filter), so a required `contract-check` never sits
 pending on a PR that doesn't touch contracts.
