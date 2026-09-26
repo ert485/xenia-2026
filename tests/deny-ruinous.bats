@@ -70,6 +70,103 @@ assert_allow() {
   done
 }
 
+# Fix round 1: the reviewer found real bypasses of the substring-based force-push/git-clean
+# matching (a second space, a quoted "push", a leading `git -C <dir>`), and false positives from
+# the substring-based proofs/.agent detection (a commit message or echo that only *mentions* a
+# pattern). The hook now tokenizes the command like a shell instead of matching raw substrings.
+@test "fix round 1: tokenized force-push bypasses are now denied" {
+  for cmd in \
+    "git -C /tmp/repo push --force" \
+    "git  push  -f origin x" \
+    'git "push" --force' \
+    "GIT_DIR=x git push --force" \
+    "cd /tmp && git push -f" \
+    "git -c user.name=x push --mirror"
+  do
+    run_hook_with "$(bash_payload "$cmd")"
+    assert_deny force-push
+  done
+}
+
+@test "fix round 1: tokenized git clean bypass (git -C .) is now denied" {
+  run_hook_with "$(bash_payload "git -C . clean -fdx")"
+  assert_deny delete-workspace
+}
+
+@test "fix round 1: quoted mentions of a denied pattern are not commands, so they are allowed" {
+  for cmd in \
+    'git commit -m "note: never git push --force here"' \
+    'echo "git push --force is banned"' \
+    'git log --grep="push --force"'
+  do
+    run_hook_with "$(bash_payload "$cmd")"
+    assert_allow
+  done
+}
+
+@test "fix round 1: a write target must resolve to docs/proofs or .agent, not just be mentioned" {
+  run_hook_with "$(bash_payload "diff docs/proofs/a.md docs/proofs/b.md > /tmp/out.diff")"
+  assert_allow
+
+  run_hook_with "$(bash_payload "cat docs/proofs/a.md | tee /tmp/copy.md")"
+  assert_allow
+
+  run_hook_with "$(bash_payload "cp docs/proofs/a.md /tmp/")"
+  assert_allow
+
+  run_hook_with "$(bash_payload "ls docs/proofs-archive/ > /tmp/x")"
+  assert_allow
+
+  run_hook_with "$(write_payload Write "docs/proofs-archive/x.md")"
+  assert_allow
+}
+
+@test "fix round 1: no-space redirects and in-place edits still resolve to their real target" {
+  run_hook_with "$(bash_payload "echo x >docs/proofs/a.md")"
+  assert_deny proofs
+
+  run_hook_with "$(bash_payload "tee -a docs/proofs/a.md")"
+  assert_deny proofs
+
+  run_hook_with "$(bash_payload "cp a .agent/STATUS.json")"
+  assert_deny verifier-output
+
+  run_hook_with "$(bash_payload "sed -i s/x/y/ docs/proofs/a.md")"
+  assert_deny proofs
+}
+
+@test "fix round 1: python3 missing denies a Bash call (fails closed), jq still available" {
+  local nojq_dir="$BATS_TEST_TMPDIR/no-python3"
+  mkdir -p "$nojq_dir"
+  local c real
+  for c in bash jq grep git mktemp cat sed; do
+    real="$(command -v "$c" 2>/dev/null)" || continue
+    ln -sf "$real" "$nojq_dir/$c"
+  done
+  run bash -c 'PATH="$1" bash "$HOOK" <<< "$2"' _ "$nojq_dir" "$(bash_payload "ls .agent")"
+  assert_deny bash-parse
+}
+
+@test "fix round 1: unbalanced quotes cannot be safely tokenized, so the call is denied" {
+  run_hook_with "$(bash_payload 'echo "unbalanced')"
+  assert_deny bash-parse
+}
+
+@test "jq missing: Bash and Write calls are denied, closed rather than guessed at" {
+  local nojq_dir="$BATS_TEST_TMPDIR/no-jq"
+  mkdir -p "$nojq_dir"
+  local c real
+  for c in bash grep python3 git mktemp cat sed; do
+    real="$(command -v "$c" 2>/dev/null)" || continue
+    ln -sf "$real" "$nojq_dir/$c"
+  done
+  run bash -c 'PATH="$1" bash "$HOOK" <<< "$2"' _ "$nojq_dir" "$(bash_payload "ls .agent")"
+  [ "$status" -eq 0 ]
+  jq -e '.hookSpecificOutput.permissionDecision == "deny"' <<< "$output"
+  reason="$(jq -r .hookSpecificOutput.permissionDecisionReason <<< "$output")"
+  assert_prefix "$reason" "deny-ruinous: jq missing"
+}
+
 @test "force-push: a plain push is allowed" {
   for cmd in "git push -u origin agent/task-11" "git push origin HEAD"; do
     run_hook_with "$(bash_payload "$cmd")"

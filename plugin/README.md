@@ -56,8 +56,12 @@ never blocks on its own failure: if the verifier itself can't run, the hook fail
 `plugin/hooks/deny-ruinous.sh` runs on every `Bash`, `Write`, `Edit`, `MultiEdit`, and `NotebookEdit`
 call and denies a short, fixed list of ruinous commands: a force push, deleting the workspace root
 or running `git clean -fx`, editing the egress firewall scripts or sudoers, and writing under
-`docs/proofs/` or `.agent/` (the verifier's own verdict). Everything else is allowed; this is a
-guardrail against the obvious, not a sandbox — the firewall and the absence of deploy credentials in
-the container are the real boundary. A denied call's reason names the rule and says what to do
-instead (usually: file a `.agent-requests/` request, or ask the human); to see why a call was denied,
-read that reason in the transcript.
+`docs/proofs/` or `.agent/` (the verifier's own verdict). A `Bash` call is judged by tokenizing it
+the way a shell would (via `python3`'s `shlex`) and checking each simple command's real subcommand
+and arguments — never by matching a raw substring, so a commit message or an `echo` that only
+*mentions* `git push --force` is never treated as running it. If `python3` is missing, or the
+command's quoting can't be safely parsed, the call is denied rather than guessed at. Everything else
+is allowed; this is a guardrail against the obvious, not a sandbox — the firewall and the absence of
+deploy credentials in the container are the real boundary. A denied call's reason names the rule and
+says what to do instead (usually: file a `.agent-requests/` request, or ask the human); to see why a
+call was denied, read that reason in the transcript.

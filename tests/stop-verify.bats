@@ -134,6 +134,21 @@ assert_prefix() {
   [ -z "$output" ]
 }
 
+@test "fix round 1: a path-traversal session_id can't steer the counter file outside .agent/" {
+  : > "$REPO/docs/notes.md"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "empty file"
+
+  local marker="$BATS_TEST_TMPDIR/pwned-marker"
+  local evil_id="/../../../../../../../../../../../../${marker#/}"
+  run bash -c 'bash "$HOOK" <<< "$1"' _ \
+    "$(jq -n --arg cwd "$REPO" --arg sid "$evil_id" '{hook_event_name:"Stop", cwd:$cwd, session_id:$sid}')"
+  [ "$status" -eq 0 ]
+  jq -e '.decision == "block"' <<< "$output"
+  [ ! -e "$marker" ]
+  [ -e "$REPO/.agent/stop-attempts-nosession" ]
+}
+
 @test "XENIA_VERIFY_ARGS can demote the empty-files check to a warning so the fixture passes" {
   : > "$REPO/docs/notes.md"
   git -C "$REPO" add -A

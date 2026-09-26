@@ -20,6 +20,10 @@ cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)" || cwd=""
 session_id="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)" || session_id=""
 [[ -n "$cwd" && -d "$cwd" ]] || exit 0
 session_id="${session_id:-nosession}"
+# The counter file's name is built from this value (fix-round-1: a payload with session_id
+# "/../../../../tmp/pwned-marker" wrote outside .agent/ entirely); anything but a plain token
+# falls back to the same default used when session_id is missing.
+[[ "$session_id" =~ ^[A-Za-z0-9_-]+$ ]] || session_id=nosession
 
 # Not inside a git worktree, or the worktree has no commits yet: exit 0 silently.
 worktree_root="$(cd "$cwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)" || exit 0
@@ -44,9 +48,9 @@ if [[ -n "${XENIA_VERIFY_ARGS:-}" ]]; then
 fi
 
 if [ "${#extra_args[@]}" -gt 0 ]; then
-  verify_out="$("$verifier" --worktree "$cwd" "${extra_args[@]}" 2>&1)"
+  verify_out="$("$verifier" --worktree "$cwd" "${extra_args[@]}")"
 else
-  verify_out="$("$verifier" --worktree "$cwd" 2>&1)"
+  verify_out="$("$verifier" --worktree "$cwd")"
 fi
 verify_status=$?
 
