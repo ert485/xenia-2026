@@ -123,9 +123,23 @@ jobs:
           REVIEW_MAX_TURNS: ${{ env.REVIEW_MAX_TURNS }}
         run: |
           case "$MODE" in
-            consistency) prompt=.kit/templates/review/consistency-prompt.md ;;
-            *) prompt=".kit/$REVIEW_PROMPT" ;;
+            consistency) kit_path=templates/review/consistency-prompt.md ;;
+            *) kit_path="$REVIEW_PROMPT" ;;
           esac
+          prompt=".kit/$kit_path"
+          if [ ! -s "$prompt" ]; then
+            msg="reviewer prompt $kit_path is not on the kit's main branch yet; merge the reviewer prompts to main first"
+            echo "::error::$msg"
+            {
+              echo '<!-- xenia-pr-review -->'
+              # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
+              echo 'Bot review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
+              if [ "$MODE" = consistency ]; then echo 'Mode: consistency (this PR changes the team rules).'; fi
+              echo
+              echo "$msg"
+            } > review.md
+            exit 0
+          fi
           set +e
           claude -p "$(cat "$prompt")" \
             --allowedTools "Read,Grep,Glob" \
@@ -134,9 +148,10 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -ne 0 ] || ! jq -e '.result | strings | length > 0' review.json > /dev/null 2>&1; then
+            last_err="$(tail -1 claude.err | sed -E 's/sk-[A-Za-z0-9_-]{20,}/sk-<redacted>/g')"
             echo "claude exited $rc; last lines of stderr:"
             tail -5 claude.err | sed -E 's/sk-[A-Za-z0-9_-]{20,}/sk-<redacted>/g'
-            jq -n '{result: "Bot: the bot could not complete the review within its limits (turns, time, or the gateway). Teammate: remove and re-add the review label to try again."}' > review.json
+            jq -n --arg err "$last_err" '{result: ("Bot: the bot could not complete the review within its limits (turns, time, or the gateway). Last stderr line: " + $err + " Teammate: remove and re-add the review label to try again.")}' > review.json
           fi
           {
             echo '<!-- xenia-pr-review -->'
@@ -295,17 +310,32 @@ jobs:
           DEEP_REVIEW_PROMPT: ${{ env.DEEP_REVIEW_PROMPT }}
           DEEP_REVIEW_MAX_TURNS: ${{ env.DEEP_REVIEW_MAX_TURNS }}
         run: |
+          kit_path="$DEEP_REVIEW_PROMPT"
+          prompt=".kit/$kit_path"
+          if [ ! -s "$prompt" ]; then
+            msg="reviewer prompt $kit_path is not on the kit's main branch yet; merge the reviewer prompts to main first"
+            echo "::error::$msg"
+            {
+              echo '<!-- xenia-deep-review -->'
+              # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
+              echo 'Bot deep review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
+              echo
+              echo "$msg"
+            } > deep-review.md
+            exit 0
+          fi
           set +e
-          claude -p "$(cat ".kit/$DEEP_REVIEW_PROMPT")" \
+          claude -p "$(cat "$prompt")" \
             --allowedTools "Read,Grep,Glob,Bash" \
             --disallowedTools "Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task" \
             --max-turns "$DEEP_REVIEW_MAX_TURNS" --output-format json > review.json 2> claude.err
           rc=$?
           set -e
           if [ "$rc" -ne 0 ] || ! jq -e '.result | strings | length > 0' review.json > /dev/null 2>&1; then
+            last_err="$(tail -1 claude.err | sed -E 's/sk-[A-Za-z0-9_-]{20,}/sk-<redacted>/g')"
             echo "claude exited $rc; last lines of stderr:"
             tail -5 claude.err | sed -E 's/sk-[A-Za-z0-9_-]{20,}/sk-<redacted>/g'
-            jq -n '{result: "Bot: the deep review could not complete within its limits (turns, time, or the gateway)."}' > review.json
+            jq -n --arg err "$last_err" '{result: ("Bot: the deep review could not complete within its limits (turns, time, or the gateway). Last stderr line: " + $err)}' > review.json
           fi
           {
             echo '<!-- xenia-deep-review -->'
