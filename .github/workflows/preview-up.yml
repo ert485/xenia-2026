@@ -1,0 +1,71 @@
+# preview-up: builds this PR on the Docker box and comments its URL. Advisory, never blocks.
+# Fork PRs get nothing: the job only runs when the head repo is this repo (P-public/ci).
+name: preview-up
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions: {}
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      APP_DIR: ${{ vars.APP_DIR || '.' }}
+      PREVIEW_DOMAIN: ${{ vars.PREVIEW_DOMAIN || 'box.26.cohack.tetl.ca' }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_PREVIEW_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'ca-central-1' }}
+          mask-aws-account-id: true
+      - name: build and start the preview on the Docker box
+        id: send
+        run: |
+          set -euo pipefail
+          iid="$(aws ssm describe-instance-information \
+            --filters "Key=tag:xenia-role,Values=docker-box" \
+            --query 'InstanceInformationList[0].InstanceId' --output text)"
+          [ -n "$iid" ] && [ "$iid" != "None" ] || { echo "::error::the Docker box is not online in SSM (stopped? scripts/startup.sh)"; exit 1; }
+          params="$(jq -nc --arg pr "$PR" --arg repo "$GITHUB_REPOSITORY" --arg sha "$HEAD_SHA" --arg dir "$APP_DIR" \
+            '{Pr:[$pr],Repo:[$repo],Sha:[$sha],AppDir:[$dir]}')"
+          cid="$(aws ssm send-command --document-name xenia-preview-up --instance-ids "$iid" \
+            --parameters "$params" --comment "preview PR $PR" --query Command.CommandId --output text)"
+          st=Pending
+          for _ in $(seq 1 120); do
+            sleep 5
+            st="$(aws ssm get-command-invocation --command-id "$cid" --instance-id "$iid" --query Status --output text 2>/dev/null || echo Pending)"
+            case "$st" in Pending|InProgress|Delayed) continue ;; *) break ;; esac
+          done
+          aws ssm get-command-invocation --command-id "$cid" --instance-id "$iid" \
+            --query '[StandardOutputContent,StandardErrorContent]' --output text | sed -E 's/[0-9]{12}/<account-id>/g'
+          test "$st" = Success
+      - name: comment the preview URL
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTCOME: ${{ steps.send.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$OUTCOME" = success ]; then
+            msg="$(printf '<!-- xenia-preview -->\nPreview: https://pr-%s.%s\n\nBot: built from %s on the Docker box. Teammate: it refreshes on every push and disappears when the PR closes.' "$PR" "$PREVIEW_DOMAIN" "${HEAD_SHA:0:7}")"
+          else
+            msg="$(printf '<!-- xenia-preview -->\nPreview: failed for %s.\n\nBot: the build or health check did not pass. Teammate: the log is at %s (the compose checks list any refused setting).' "${HEAD_SHA:0:7}" "$RUN_URL")"
+          fi
+          id="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- xenia-preview -->")) | .id' | head -1)"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$msg" >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$msg" >/dev/null
+          fi
