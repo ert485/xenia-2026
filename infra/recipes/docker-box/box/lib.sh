@@ -6,7 +6,10 @@ set -euo pipefail
 
 KIT_ON_BOX="${KIT_ON_BOX:-/srv/kit}"
 BOX_SCRIPTS="${BOX_SCRIPTS:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-export KIT_ON_BOX BOX_SCRIPTS
+# Where deploy.sh (Task 9) records rollback bookkeeping and gateway.sh's `current` action (Task 26)
+# reads it back. Overridable so tests can point it at fixture files instead of the real box path.
+APP_STATE_DIR="${APP_STATE_DIR:-/srv/app}"
+export KIT_ON_BOX BOX_SCRIPTS APP_STATE_DIR
 # SSM Run Command starts scripts with a minimal environment; git and docker want HOME.
 export HOME="${HOME:-/root}"
 

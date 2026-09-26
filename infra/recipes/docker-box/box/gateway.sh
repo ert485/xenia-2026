@@ -58,9 +58,16 @@ case "${1:-}" in
     "$BOX_SCRIPTS/app-down.sh"
     ;;
   current)
-    # Rollback bookkeeping written by deploy.sh (Task 9); scripts/rollback.sh reads it (Task 26).
-    echo "previous: $(cat /srv/app/previous 2>/dev/null || echo none)"
-    echo "current: $(cat /srv/app/current.json 2>/dev/null || echo '{}')"
+    # Deploy state for scripts/rollback.sh. Images are printed without their registry host, which
+    # carries the account ID and would be masked on the way out.
+    prev=none
+    if [[ -s "$APP_STATE_DIR/previous" ]]; then prev="$(sed -E 's|^[^/]+/||' "$APP_STATE_DIR/previous")"; fi
+    printf 'previous=%s\n' "$prev"
+    if [[ -s "$APP_STATE_DIR/current.json" ]]; then
+      jq -r '"repo=\(.repo)", "sha=\(.sha)", "image=\(.image | sub("^[^/]+/"; ""))"' "$APP_STATE_DIR/current.json"
+    else
+      echo "current=none"
+    fi
     ;;
   *)
     die "usage: gateway.sh update|restart|status|logs|app-down|current"
