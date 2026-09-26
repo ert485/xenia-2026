@@ -244,8 +244,8 @@ jobs:
         env:
           PR: ${{ github.event.pull_request.number }}
         run: |
-          comments="$(curl -sf "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" || echo '[]')"
-          quick="$(printf '%s' "$comments" | jq -r '[.[] | select(.body | startswith("<!-- xenia-pr-review -->"))] | last | .body // empty')"
+          comments="$(curl -sf "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100")" || comments='[]'
+          quick="$(printf '%s' "$comments" | jq -r '[.[] | select(.body | startswith("<!-- xenia-pr-review -->"))] | last | .body // empty' 2>/dev/null)" || quick=""
           if [ -n "$quick" ]; then
             printf '%s\n' "$quick" > .review/quick-review.md
           else
