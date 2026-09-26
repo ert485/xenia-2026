@@ -13,5 +13,13 @@ case "$*" in
   *"dynamodb describe-table"*)      [[ -f "$FAKE_STATE/table" ]] ;;
   *"dynamodb create-table"*)        touch "$FAKE_STATE/table" ;;
   *"dynamodb wait"*)                exit 0 ;;
+  *"organizations list-policies"*)
+    if [[ -f "$FAKE_STATE/scp" ]]; then printf '{"Policies":[{"Id":"p-lockdown1","Name":"xenia-lockdown"}]}\n'
+    else printf '{"Policies":[]}\n'; fi ;;
+  *"organizations list-targets-for-policy"*)
+    if [[ -f "$FAKE_STATE/scp-attached" ]]; then printf '{"Targets":[{"TargetId":"%s","Type":"ACCOUNT"}]}\n' "${FAKE_MEMBER:-}"
+    else printf '{"Targets":[]}\n'; fi ;;
+  *"organizations attach-policy"*)  touch "$FAKE_STATE/scp-attached" ;;
+  *"organizations detach-policy"*)  rm -f "$FAKE_STATE/scp-attached" ;;
   *) exit 0 ;;
 esac
