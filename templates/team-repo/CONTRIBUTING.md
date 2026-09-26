@@ -16,3 +16,11 @@ Teammate: this is how we work. The why is in `PRINCIPLES.md` and `PRINCIPLES-EXT
   this.
 - **Compose convention.** The service the world sees is named `web`, listens on `APP_PORT` (3000 by
   default), and publishes no `ports:`; the kit attaches it to the demo URL and to each PR's preview.
+
+## Contracts (when there is an API)
+
+Teammate: the kit ships a `contracts/` starter (OpenAPI 3.1, event schemas, `make types`) and a
+`contract-check` workflow that lints the spec, fails when generated types are stale, and fails on breaking
+changes unless the PR is labelled `breaking-ok`. Adopt it at the 11:30 architecture checkpoint by following
+`templates/contracts/README.md` in the kit repo (https://github.com/ert485/xenia-2026). A server-rendered
+monolith skips it.

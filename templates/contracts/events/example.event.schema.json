@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:team:events:item.created:v1",
+  "title": "item.created",
+  "description": "Emitted once after an item is stored. Consumers validate it at the boundary before use.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "version", "id", "occurredAt", "data"],
+  "properties": {
+    "type": { "const": "item.created" },
+    "version": { "const": 1 },
+    "id": { "type": "string", "format": "uuid", "description": "Unique per event, for idempotent consumers" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item"],
+      "properties": {
+        "item": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "createdAt"],
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "createdAt": { "type": "string", "format": "date-time" }
+          }
+        }
+      }
+    }
+  }
+}
