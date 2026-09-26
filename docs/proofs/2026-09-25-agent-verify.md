@@ -19,11 +19,12 @@ Date: 2026-09-25. Plan: `docs/superpowers/plans/2026-09-25-container-first-workf
 
 ## TDD evidence
 
-RED (`bats tests/agent-verify.bats`, before `plugin/scripts/agent-verify.sh` existed): all 14
-tests failed, each with exit 127 ("command not found"):
+RED (`bats tests/agent-verify.bats`, with `plugin/scripts/agent-verify.sh` moved aside): all 16
+tests failed (14 from the initial implementation, plus two added in fix round 1 for findings 1 and
+3 below):
 
 ```
-1..14
+1..16
 not ok 1 pass: a clean branch with a script change and a test change
 not ok 2 replay Task 15: a fake proof is blocked until a result file backs it
 not ok 3 replay Task 20: zero-byte and whitespace-only files block, .gitkeep is spared
@@ -33,18 +34,20 @@ not ok 6 root-files: stray untracked reports block; REPORT.md, an allow-listed n
 not ok 7 make-check: a check target removed since the base commit blocks
 not ok 8 scripts-without-tests warns alone, not when a test also changed
 not ok 9 uncommitted-changes warns, dirty is true, and an uncommitted 0-byte file still blocks
-not ok 10 --skip drops a check and --warn demotes one to pass
-not ok 11 REPORT.md is never read as evidence, and the script names it exactly once
-not ok 12 a bogus --base ref and running outside a git worktree both error
-not ok 13 an unknown check name to --skip exits 2
-not ok 14 --help lists all seven check names
+not ok 10 --skip make-check never runs make: no log, and the check target's own side effect never happens
+not ok 11 uncommitted-changes on a rename warns with the new path, not the old -> new form
+not ok 12 --skip drops a check and --warn demotes one to pass
+not ok 13 REPORT.md is never read as evidence, and the script names it exactly once
+not ok 14 a bogus --base ref and running outside a git worktree both error
+not ok 15 an unknown check name to --skip exits 2
+not ok 16 --help lists all seven check names
 ```
 
-GREEN (same command, after implementing the script): all 14 pass, including the three replayed
-incidents:
+GREEN (same command, script restored): all 16 pass, including the three replayed incidents and
+the two fix-round tests:
 
 ```
-1..14
+1..16
 ok 1 pass: a clean branch with a script change and a test change
 ok 2 replay Task 15: a fake proof is blocked until a result file backs it
 ok 3 replay Task 20: zero-byte and whitespace-only files block, .gitkeep is spared
@@ -54,11 +57,13 @@ ok 6 root-files: stray untracked reports block; REPORT.md, an allow-listed name,
 ok 7 make-check: a check target removed since the base commit blocks
 ok 8 scripts-without-tests warns alone, not when a test also changed
 ok 9 uncommitted-changes warns, dirty is true, and an uncommitted 0-byte file still blocks
-ok 10 --skip drops a check and --warn demotes one to pass
-ok 11 REPORT.md is never read as evidence, and the script names it exactly once
-ok 12 a bogus --base ref and running outside a git worktree both error
-ok 13 an unknown check name to --skip exits 2
-ok 14 --help lists all seven check names
+ok 10 --skip make-check never runs make: no log, and the check target's own side effect never happens
+ok 11 uncommitted-changes on a rename warns with the new path, not the old -> new form
+ok 12 --skip drops a check and --warn demotes one to pass
+ok 13 REPORT.md is never read as evidence, and the script names it exactly once
+ok 14 a bogus --base ref and running outside a git worktree both error
+ok 15 an unknown check name to --skip exits 2
+ok 16 --help lists all seven check names
 ```
 
 `shellcheck -x plugin/scripts/agent-verify.sh scripts/agent-verify.sh` is clean (exit 0).
@@ -66,10 +71,12 @@ ok 14 --help lists all seven check names
 ## Step 5: the verifier judging this very worktree
 
 With `docs/proofs/2026-09-25-agent-verify.md` written as a stub (before this final version) and
-nothing else committed, `scripts/agent-verify.sh` (no flags) reported exactly one reason:
+nothing else committed, `scripts/agent-verify.sh` (no flags) reported exactly one reason. The
+absolute local path in the `-> ...STATUS.json` line below has been shortened to `<worktree>`;
+every other byte is the real recorded output:
 
 ```
-agent-verify: blocked (1 reasons, 9 warnings) -> /Users/eriktetland/Code/xenia-2026/.claude/worktrees/build-verifier/.agent/STATUS.json
+agent-verify: blocked (1 reasons, 9 warnings) -> <worktree>/.agent/STATUS.json
   blocked proofs-unbacked: docs/proofs/2026-09-25-agent-verify.md: no .agent-requests/*.result.md references this path
   warning uncommitted-changes: .devcontainer/Dockerfile: uncommitted or untracked change
   warning uncommitted-changes: .devcontainer/init-firewall.sh: uncommitted or untracked change
@@ -86,7 +93,7 @@ exit=1
 `scripts/agent-verify.sh --warn proofs-unbacked` turned that same reason into a warning and passed:
 
 ```
-agent-verify: pass (0 reasons, 10 warnings) -> /Users/eriktetland/Code/xenia-2026/.claude/worktrees/build-verifier/.agent/STATUS.json
+agent-verify: pass (0 reasons, 10 warnings) -> <worktree>/.agent/STATUS.json
   warning proofs-unbacked: docs/proofs/2026-09-25-agent-verify.md: no .agent-requests/*.result.md references this path
   warning uncommitted-changes: .devcontainer/Dockerfile: uncommitted or untracked change
   warning uncommitted-changes: .devcontainer/init-firewall.sh: uncommitted or untracked change
@@ -142,7 +149,10 @@ mkdocs, version 1.6.1 from /opt/xenia/venv/lib/python3.11/site-packages/mkdocs (
 proving both `segno` and `yaml` import with plain `python3`, no `.venv` or `make tools` needed).
 
 `bats tests/agent-verify.bats` inside the container, after the bats-1.8.2 fix, matches the Mac
-exactly: `1..14`, all 14 `ok`, no bats warning.
+exactly: `1..14`, all 14 `ok`, no bats warning. (Fix round 1 added two more tests after this
+container run; they are proven on the Mac only — see TDD evidence above — since fix round 1
+was explicitly told not to touch Docker while the daemon was hung and this Mac had about 2 GiB
+free. Both fixed findings from that round are covered by those two tests either way.)
 
 **Concern, not resolved in this task's control:** the full `make check` inside the container could
 not be proven end to end. `make validate` downloads a fresh `hashicorp/aws` provider per stack
@@ -181,9 +191,13 @@ No findings to report. Good job! (12 suppressed)
 make check: OK
 ```
 
-97 tests ran and passed (`1..97`, 0 `not ok`), including all 14 of this task's new tests, plus the
-kit's existing suite (deploy, box, gateway-key, GPU capacity/lifecycle, leak-check, tf.sh, and the
-rest), unchanged by this task's Dockerfile/gitignore/firewall edits.
+97 tests ran and passed (`1..97`, 0 `not ok`), including the 14 new tests from the initial
+implementation, plus the kit's existing suite (deploy, box, gateway-key, GPU capacity/lifecycle,
+leak-check, tf.sh, and the rest), unchanged by this task's Dockerfile/gitignore/firewall edits.
+Fix round 1's two additional tests are not reflected in this tail (a fresh full `make check` was
+explicitly out of scope for that round, since its own `terraform init` writes providers to a Mac
+disk that had about 2 GiB free at the time); they are proven directly via `bats
+tests/agent-verify.bats`, shown 16/16 in the TDD evidence above.
 
 ## Result
 

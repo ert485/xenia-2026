@@ -178,6 +178,27 @@ status_json() { jq -r "$1" "$REPO/.agent/STATUS.json"; }
   [ "$(status_json '[.reasons[] | select(.check=="empty-files")] | length')" -ge 1 ]
 }
 
+@test "--skip make-check never runs make: no log, and the check target's own side effect never happens" {
+  printf 'check:\n\ttouch MARKER\n\t@exit 1\n' > "$REPO/Makefile"
+  git -C "$REPO" commit -aqm "break check with a marker"
+
+  verify --skip make-check
+  [ "$status" -eq 0 ]
+  [ "$(status_json '[.reasons[] | select(.check=="make-check")] | length')" -eq 0 ]
+  [ ! -f "$REPO/.agent/make-check.log" ]
+  [ ! -f "$REPO/MARKER" ]
+}
+
+@test "uncommitted-changes on a rename warns with the new path, not the old -> new form" {
+  git -C "$REPO" mv scripts/hello.sh scripts/renamed.sh
+
+  verify
+  [ "$(status_json .dirty)" = "true" ]
+  [ "$(status_json '[.warnings[] | select(.check=="uncommitted-changes" and (.message | startswith("scripts/renamed.sh")))] | length')" -eq 1 ]
+  run jq -e '.warnings[] | select(.check=="uncommitted-changes") | select(.message | contains("->"))' "$REPO/.agent/STATUS.json"
+  [ "$status" -ne 0 ]
+}
+
 @test "--skip drops a check and --warn demotes one to pass" {
   printf 'check:\n\t@exit 1\n' > "$REPO/Makefile"
   git -C "$REPO" commit -aqm "break check"

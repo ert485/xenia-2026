@@ -30,27 +30,29 @@ Exit codes: 0 pass, 1 blocked, 2 usage or internal error.
 Checks, in the order they run:
   make-check             Runs `make check` when the worktree defines a check target; blocks on a
                           non-zero exit, or if the base commit had a check target and the
-                          worktree no longer does; warns if neither has one. Incident: a failing
-                          `make check` was hidden behind a discarded stderr and a fallback echo.
+                          worktree no longer does; warns if neither has one. Incident: on
+                          2026-09-25 a failing `make check` was hidden behind a discarded stderr
+                          and a fallback echo.
   proofs-unbacked         Blocks a changed docs/proofs/ file unless some .agent-requests/*.result.md
-                          in the worktree names that path. Incident: a proof was committed for
-                          commands that were never run.
+                          in the worktree names that path. Incident: on 2026-09-25 a proof was
+                          committed for commands that were never run.
   empty-files             Blocks a changed file that is zero bytes or whitespace-only, except
-                          files named .gitkeep or .keep. Incident: placeholder images were
-                          committed after being created with `touch`.
+                          files named .gitkeep or .keep. Incident: on 2026-09-25 placeholder
+                          images were committed after being created with `touch`.
   root-files              Blocks a new file added directly to the repository root that is not on
                           the allow-list (built in, plus one name per line from an optional
-                          .agent-verify/root-allow file). Incident: 21 stray completion reports
-                          were left in the repository root.
+                          .agent-verify/root-allow file). Incident: on 2026-09-25, 21 stray
+                          completion reports were left in the repository root.
   failure-hiding          Warns when an added script line discards a command's stderr, forces a
                           zero exit regardless of what ran, or falls back to printing a message
                           after a failure, unless the line or the line above it is justified with
-                          an `ok-to-hide:` note. Incident: this is exactly how a failing check was
-                          hidden.
+                          an `ok-to-hide:` note. Incident: on 2026-09-25 this is exactly how a
+                          failing check was hidden.
   scripts-without-tests   Warns when a script changes and no file under tests/ changes. Incident:
-                          an unattended run shipped scripts with no tests at all.
+                          on 2026-09-25 an unattended run shipped scripts with no tests at all.
   uncommitted-changes     Warns when the worktree has uncommitted or untracked, non-ignored
-                          changes, and says which paths.
+                          changes, and says which paths. Incident: on 2026-09-25, unattended runs
+                          left work uncommitted with no record of it.
 EOF
 }
 
@@ -123,12 +125,14 @@ add_reason() {
   else
     jq -nc --arg check "$check" --arg message "$message" '{check:$check, message:$message}' >> "$reasons_file"
   fi
+  return 0
 }
 
 add_warning() {
   local check="$1" message="$2"
   is_skipped "$check" && return 0
   jq -nc --arg check "$check" --arg message "$message" '{check:$check, message:$message}' >> "$warnings_file"
+  return 0
 }
 
 emit_and_exit() {
@@ -286,6 +290,7 @@ base_has_check_target() {
 }
 
 check_make() {
+  is_skipped "make-check" && return 0
   local log="$agent_dir/make-check.log"
   if worktree_has_check_target; then
     mkdir -p "$agent_dir"
@@ -321,6 +326,7 @@ proof_is_backed() {
 }
 
 check_proofs_unbacked() {
+  is_skipped "proofs-unbacked" && return 0
   local f
   [ "${#changed_files[@]}" -eq 0 ] && return 0
   for f in "${changed_files[@]}"; do
@@ -337,6 +343,7 @@ check_proofs_unbacked() {
 # named .gitkeep or .keep. Incident: on 2026-09-25, 0-byte placeholder images were committed after
 # being made with `touch`.
 check_empty_files() {
+  is_skipped "empty-files" && return 0
   local f base
   [ "${#changed_files[@]}" -eq 0 ] && return 0
   for f in "${changed_files[@]}"; do
@@ -378,6 +385,7 @@ is_root_allowed() {
 }
 
 check_root_files() {
+  is_skipped "root-files" && return 0
   local f
   [ "${#changed_files[@]}" -eq 0 ] && return 0
   for f in "${changed_files[@]}"; do
@@ -449,9 +457,11 @@ scan_failure_hiding() {
   done <<EOF_LINES
 $lines
 EOF_LINES
+  return 0
 }
 
 check_failure_hiding() {
+  is_skipped "failure-hiding" && return 0
   local f
   [ "${#changed_files[@]}" -eq 0 ] && return 0
   for f in "${changed_files[@]}"; do
@@ -463,8 +473,9 @@ check_failure_hiding() {
 }
 
 # Check scripts-without-tests: warns when a script changes and no file under tests/ changes.
-# Incident: the battle test's unattended runs shipped scripts with no tests at all.
+# Incident: on 2026-09-25 the battle test's unattended runs shipped scripts with no tests at all.
 check_scripts_without_tests() {
+  is_skipped "scripts-without-tests" && return 0
   local f any_script=0 any_test=0
   if [ "${#changed_files[@]}" -gt 0 ]; then
     for f in "${changed_files[@]}"; do
@@ -480,15 +491,26 @@ check_scripts_without_tests() {
 }
 
 # Check uncommitted-changes: warns when the worktree has uncommitted or untracked, non-ignored
-# changes, naming each path. Incident: unattended runs left work uncommitted with no record.
+# changes, naming each path. Incident: on 2026-09-25, unattended runs left work uncommitted with
+# no record of it.
 check_uncommitted() {
+  is_skipped "uncommitted-changes" && return 0
   [ "$dirty" = "true" ] || return 0
-  local line path
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    path="${line:3}"
+  local entry status path orig_path
+  while IFS= read -r -d '' entry; do
+    [ -n "$entry" ] || continue
+    status="${entry:0:2}"
+    path="${entry:3}"
+    case "$status" in
+      *R*|*C*)
+        # A rename or copy carries a second NUL-terminated field, the original path; consume and
+        # discard it so it isn't misread as the next entry's status+path.
+        IFS= read -r -d '' orig_path || :
+        : "$orig_path" # discarded: the rename's original path, not reported
+        ;;
+    esac
     add_warning "uncommitted-changes" "$path: uncommitted or untracked change"
-  done < <(git status --porcelain --untracked-files=normal -- .)
+  done < <(git status --porcelain -z --untracked-files=normal -- .)
   return 0
 }
 

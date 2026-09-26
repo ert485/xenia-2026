@@ -14,8 +14,7 @@ ARG GITLEAKS_VERSION=8.30.1
 ARG ACTIONLINT_VERSION=1.7.11
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
 
-# Upstream tool list plus Python, certificates, and the kit's test tools (`make check` needs
-# bats and shellcheck in the container too, not just on the Mac).
+# Upstream tool list plus Python, certificates, and the kit's test tools (`make check` needs bats and shellcheck here too).
 RUN apt-get update && apt-get install -y --no-install-recommends \
   less git procps sudo fzf zsh man-db unzip gnupg2 gh iptables ipset iproute2 dnsutils aggregate jq nano vim \
   python3 python3-pip python3-venv pipx ca-certificates curl wget bats shellcheck \
@@ -58,8 +57,7 @@ RUN ARCH="$(dpkg --print-architecture)" \
 
 USER node
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
-# /opt/xenia/venv/bin goes first so the site-build and QR tools work via plain python3 with no
-# `make tools` step (the venv is created below, once pipx and the other node-owned bits are set up).
+# /opt/xenia/venv/bin goes first so the site-build and QR tools work via plain python3 with no `make tools` step.
 ENV PATH=/opt/xenia/venv/bin:$PATH:/usr/local/share/npm-global/bin:/home/node/.local/bin
 ENV SHELL=/bin/zsh
 ENV EDITOR=nano
@@ -78,8 +76,7 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "opencode-
 RUN pipx install ruff && pipx install mypy && pipx install pytest && pipx install uv && pipx install zizmor \
   && uv python install 3.12
 
-# The site-build and QR tools, in a venv so they don't need `make tools`; the kit's scripts fall
-# back to plain python3 when .venv is absent, which is exactly this venv's situation in the image.
+# The site-build and QR tools in a venv; the kit's scripts already fall back to plain python3 when .venv is absent.
 RUN python3 -m venv /opt/xenia/venv \
   && /opt/xenia/venv/bin/pip install -q 'mkdocs-material>=9.5,<10' segno pyyaml
 
@@ -88,8 +85,7 @@ USER root
 COPY --chown=node:node plugin/ /opt/xenia/plugins/xenia-kit/
 ENV CLAUDE_CODE_PLUGIN_SEED_DIR=/opt/xenia/plugins
 
-# /etc/profile resets PATH for a login shell (`bash -lc`, what `make check` runs under in CI and
-# in this proof), dropping the ENV PATH above; a profile.d script restores the venv ahead of it.
+# /etc/profile resets PATH for a login shell (`bash -lc`), dropping the ENV PATH above; this restores the venv ahead of it.
 RUN echo 'export PATH="/opt/xenia/venv/bin:$PATH"' > /etc/profile.d/xenia-venv-path.sh
 
 COPY .devcontainer/init-firewall.sh .devcontainer/refresh-firewall.sh /usr/local/bin/
