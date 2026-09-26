@@ -1,0 +1,34 @@
+name: Friction
+description: Something in the kit, the tooling, or the way we work hurt. One line is enough.
+title: "Friction: "
+labels: [friction]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Teammate: one line is enough; the pain-review bot ranks the pile. Everything here is public:
+        no keys, no logs with emails or IP addresses, no contact details. (In Claude Code, /pain does this for you.)
+  - type: textarea
+    id: what-hurt
+    attributes:
+      label: What hurt
+    validations:
+      required: true
+  - type: dropdown
+    id: how-often
+    attributes:
+      label: How often
+      options:
+        - once
+        - a few times
+        - constantly
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround
+      description: What got you unstuck, if anything.
+  - type: input
+    id: tool
+    attributes:
+      label: Tool
+      placeholder: Claude Code, OpenCode, dev container, CI, gateway, box, docs

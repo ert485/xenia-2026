@@ -1,0 +1,12 @@
+# Code owners: the two or three teammates named at idea lock. Any one owner approves a change to these
+# paths; an owner's own PR needs a different owner, because GitHub never lets an author approve their
+# own PR. Everything else self-merges once CI is green (P-two-gates). Owned set is the rules files
+# only (Erik's decision, 2026-09-24): rules edits are rare and a team agreement worth a second
+# reviewer; workflows, the dev container, the plugin, Makefile, and compose files change often
+# mid-event as agents fix CI, and a second-owner gate there added little given every member's
+# near-admin AWS access. The residual risk (an agent leaking the gateway CI key or the Discord
+# webhook) is covered by per-key budgets, one-step rotation, gitleaks, fork skip, and the reviewer
+# ranking CI/secrets changes as a finding.
+/PRINCIPLES.md            @OWNER1 @OWNER2
+/PRINCIPLES-EXTENDED.md   @OWNER1 @OWNER2
+/CODEOWNERS               @OWNER1 @OWNER2
