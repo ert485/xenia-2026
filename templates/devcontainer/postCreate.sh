@@ -55,4 +55,23 @@ if [[ -x "$root/plugin/scripts/doctor.sh" ]]; then
     "$root/plugin/scripts/doctor.sh"
   ) || echo "postCreate: doctor reported problems; open a terminal and run /doctor in claude" >&2
 fi
+
+# The kit plugin is seeded via CLAUDE_CODE_PLUGIN_SEED_DIR (Dockerfile); make sure it is actually
+# picked up. If not, install it explicitly, and if even that is refused (it takes a marketplace
+# name, not a local path), fall back to a shell alias. Documented in plugin/README.md; never fails
+# postCreate.sh itself.
+if command -v claude >/dev/null 2>&1; then
+  if claude plugin list 2>/dev/null | grep -q xenia-kit; then
+    :
+  elif claude plugin install /opt/xenia/plugins/xenia-kit >/dev/null 2>&1; then
+    echo "postCreate: installed the xenia-kit plugin explicitly (the seed directory was not picked up)"
+  else
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+      touch "$rc"
+      grep -qF "alias claude='claude --plugin-dir /opt/xenia/plugins/xenia-kit'" "$rc" \
+        || echo "alias claude='claude --plugin-dir /opt/xenia/plugins/xenia-kit'" >> "$rc"
+    done
+    echo "postCreate: xenia-kit plugin install was refused; aliased claude to --plugin-dir instead (see plugin/README.md)" >&2
+  fi
+fi
 echo "postCreate: done. Teammate: open a new terminal, then run claude."
