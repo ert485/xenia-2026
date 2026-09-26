@@ -17,3 +17,6 @@ site/dist/
 *.pem
 node_modules/
 docs/proofs/*.raw
+# the verifier's own output and the broker's request/result files never get committed
+.agent/
+.agent-requests/

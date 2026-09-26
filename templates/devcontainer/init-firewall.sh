@@ -138,6 +138,8 @@ for domain in \
     "sts.ca-central-1.amazonaws.com" \
     "ssm.ca-central-1.amazonaws.com" \
     "public.ecr.aws" \
+    "registry.terraform.io" \
+    "releases.hashicorp.com" \
     "marketplace.visualstudio.com" \
     "vscode.blob.core.windows.net" \
     "update.code.visualstudio.com"; do

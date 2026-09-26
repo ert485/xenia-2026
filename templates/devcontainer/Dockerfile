@@ -11,12 +11,14 @@ ARG OPENCODE_VERSION=1.18.32
 ARG TERRAFORM_VERSION=1.5.7
 ARG GIT_DELTA_VERSION=0.18.2
 ARG GITLEAKS_VERSION=8.30.1
+ARG ACTIONLINT_VERSION=1.7.11
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
 
-# Upstream tool list plus Python and certificates.
+# Upstream tool list plus Python, certificates, and the kit's test tools (`make check` needs
+# bats and shellcheck in the container too, not just on the Mac).
 RUN apt-get update && apt-get install -y --no-install-recommends \
   less git procps sudo fzf zsh man-db unzip gnupg2 gh iptables ipset iproute2 dnsutils aggregate jq nano vim \
-  python3 python3-pip python3-venv pipx ca-certificates curl wget \
+  python3 python3-pip python3-venv pipx ca-certificates curl wget bats shellcheck \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Docker CLI and the compose and buildx plugins (client only; the daemon is the host's or Codespaces').
@@ -36,9 +38,14 @@ RUN ARCH="$(dpkg --print-architecture)" \
 RUN ARCH="$(dpkg --print-architecture | sed 's/amd64/x64/')" \
   && curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${ARCH}.tar.gz" \
   | tar -xzf - -C /usr/local/bin gitleaks
+RUN ARCH="$(dpkg --print-architecture)" \
+  && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" \
+  | tar -xzf - -C /usr/local/bin actionlint
 
 # Upstream: npm global prefix, persisted history, orientation variable, workspace and config dirs.
 RUN mkdir -p /usr/local/share/npm-global && chown -R node:node /usr/local/share
+# /opt/xenia holds the plugin seed (COPY below) and the venv created as node further down.
+RUN mkdir -p /opt/xenia && chown node:node /opt/xenia
 ARG USERNAME=node
 RUN mkdir /commandhistory && touch /commandhistory/.bash_history && chown -R $USERNAME /commandhistory
 ENV DEVCONTAINER=true
@@ -51,7 +58,9 @@ RUN ARCH="$(dpkg --print-architecture)" \
 
 USER node
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
-ENV PATH=$PATH:/usr/local/share/npm-global/bin:/home/node/.local/bin
+# /opt/xenia/venv/bin goes first so the site-build and QR tools work via plain python3 with no
+# `make tools` step (the venv is created below, once pipx and the other node-owned bits are set up).
+ENV PATH=/opt/xenia/venv/bin:$PATH:/usr/local/share/npm-global/bin:/home/node/.local/bin
 ENV SHELL=/bin/zsh
 ENV EDITOR=nano
 ENV VISUAL=nano
@@ -66,13 +75,22 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 
 # The two coding agents, pinned, and the Python toolchain `make check` uses in a Python team repo.
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "opencode-ai@${OPENCODE_VERSION}"
-RUN pipx install ruff && pipx install mypy && pipx install pytest && pipx install uv \
+RUN pipx install ruff && pipx install mypy && pipx install pytest && pipx install uv && pipx install zizmor \
   && uv python install 3.12
+
+# The site-build and QR tools, in a venv so they don't need `make tools`; the kit's scripts fall
+# back to plain python3 when .venv is absent, which is exactly this venv's situation in the image.
+RUN python3 -m venv /opt/xenia/venv \
+  && /opt/xenia/venv/bin/pip install -q 'mkdocs-material>=9.5,<10' segno pyyaml
 
 # The kit plugin, seeded at user scope (spec section 11). Kept outside ~/.claude, which is a volume.
 USER root
 COPY --chown=node:node plugin/ /opt/xenia/plugins/xenia-kit/
 ENV CLAUDE_CODE_PLUGIN_SEED_DIR=/opt/xenia/plugins
+
+# /etc/profile resets PATH for a login shell (`bash -lc`, what `make check` runs under in CI and
+# in this proof), dropping the ENV PATH above; a profile.d script restores the venv ahead of it.
+RUN echo 'export PATH="/opt/xenia/venv/bin:$PATH"' > /etc/profile.d/xenia-venv-path.sh
 
 COPY .devcontainer/init-firewall.sh .devcontainer/refresh-firewall.sh /usr/local/bin/
 RUN chmod 0755 /usr/local/bin/init-firewall.sh /usr/local/bin/refresh-firewall.sh \
