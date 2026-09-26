@@ -35,6 +35,16 @@ prev="$(docker inspect -f '{{.Config.Image}}' app-web 2>/dev/null || true)"
 if [[ -n "$prev" && "$prev" != "$image" ]]; then printf '%s\n' "$prev" > /srv/app/previous; fi
 
 export IMAGE="$image" APP_PORT GIT_SHA="$sha"
+
+# App secrets and settings: every /xenia/app/<NAME> parameter (written from the laptop with
+# scripts/put-secret.sh app/<NAME>) becomes NAME in the environment compose renders the team's file
+# with. The value never touches the disk or a command line. No parameters: nothing is exported.
+while IFS=$'\t' read -r name value; do
+  [[ -n "$name" ]] || continue
+  export "${name##*/}=$value"
+done < <(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption \
+  --query 'Parameters[].[Name,Value]' --output text)
+
 dc() { docker compose -p app --project-directory "$dir" -f "$compose" -f "$here/../app/compose.app.yml" "$@"; }
 dc pull --quiet web
 dc up -d --no-build --remove-orphans
