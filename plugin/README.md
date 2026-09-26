@@ -22,6 +22,18 @@ it is vendored into each team repo at `plugin/`.
 Skills address the agent and start with "Agent:"; they call the human "the teammate". The CI reviewer
 calls itself "bot". Keep that when adding a skill.
 
+## The CI reviewer (not part of this plugin)
+
+`pr-review.yml` runs two passes, both advisory (P-two-gates: only `make check` and shutdown
+coverage block a merge). The quick review runs on every PR that gets the `review` label or is
+marked ready for review: read-only, `make check`'s plain-runner output, and a 40-turn budget. The
+deep review reruns the same bot with a wider brief (bugs, security, conformance to the task and
+`PRINCIPLES.md`, and whether the tests actually ran), a 120-turn budget, and Bash so it can run
+those tests itself; it also reads the quick review's own comment and lists what that pass missed.
+It runs on every PR while the flow is young, then on a sample (`vars.DEEP_REVIEW_SAMPLE`, a repo
+variable, default: every PR) as it stops finding anything new, and always for a PR touching
+`infra/`, `.github/`, `templates/`, or `scripts/`, or carrying the `deep-review` label.
+
 ## Other teams
 
 You are welcome to use it. Pin it by commit rather than following `main`: copy `plugin/` from a
@@ -53,7 +65,7 @@ file is what to read to see why it fired. Set `XENIA_VERIFY_ARGS` (for example
 `--skip make-check`) in the environment to tune which checks run, without editing the plugin. It
 never blocks on its own failure: if the verifier itself can't run, the hook fails open with a
 `systemMessage` and CI's copy of the same checks (Task 14) is the backstop. Team repos treat a new
-root file as a warning rather than a block, since teams own their own root layout: this comes from
+root file as a warning rather than a block, since teams own their root layout: this comes from
 `XENIA_VERIFY_ARGS: "--warn root-files"` in `templates/devcontainer/devcontainer.json`'s
 `containerEnv` (and its byte-identical copy at `.devcontainer/devcontainer.json`).
 
