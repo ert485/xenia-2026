@@ -35,7 +35,7 @@ with open(sys.argv[1], encoding="utf-8", newline="") as f:
             continue
         m = rx.match(line)
         if m:
-            print(f"{m.group(1)}\t{m.group(2) or ''}")
+            print(m.group(1) + (f"\t{m.group(2)}" if m.group(2) else ""))
 PY
 }
 
