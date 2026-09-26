@@ -19,15 +19,15 @@ EOF
 @test "reachable backend: prints the real api_base and logs reachable" {
   CURL_REACHABLE=1 run bash -c 'source "$LIB"; vllm_probe "https://1.2.3.4:8443/v1" tok "https://gpu-not-provisioned.invalid/v1"'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"vLLM backend: reachable (https://1.2.3.4:8443/v1)"* ]]
-  [[ "$output" == *"https://1.2.3.4:8443/v1"* ]]
+  [[ "$output" == *"vLLM backend: reachable (https://1.2.3.4:8443/v1)"* ]] || return 1
+  [[ "$output" == *"https://1.2.3.4:8443/v1"* ]] || return 1
   grep -qF -- '-H Authorization: Bearer tok https://1.2.3.4:8443/health' "$CURL_CALLS"
 }
 
 @test "unreachable backend: prints the placeholder and logs why" {
   CURL_REACHABLE=0 run bash -c 'source "$LIB"; vllm_probe "https://1.2.3.4:8443/v1" tok "https://gpu-not-provisioned.invalid/v1"'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"vLLM backend not reachable; using the instant-fail placeholder, requests go to Bedrock"* ]]
+  [[ "$output" == *"vLLM backend not reachable; using the instant-fail placeholder, requests go to Bedrock"* ]] || return 1
   last="$(tail -n1 <<< "$output")"
   [ "$last" = "https://gpu-not-provisioned.invalid/v1" ]
 }

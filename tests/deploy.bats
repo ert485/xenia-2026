@@ -34,9 +34,9 @@ compose() { printf '%b' "$1" > "$TMP/compose.yml"; }
 
 @test "deploy.sh refuses a bad sha, an app dir with .., and a repo that is not owner/name" {
   run infra/recipes/docker-box/box/deploy.sh ert485/xenia-2026 notasha x.test/xenia/app:sha-1 .
-  [ "$status" -eq 1 ]; [[ "$output" == *"40 hex"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"40 hex"* ]] || return 1
   run infra/recipes/docker-box/box/deploy.sh ert485/xenia-2026 "$(printf 'a%.0s' $(seq 1 40))" x.test/xenia/app:sha-1 ../etc
-  [ "$status" -eq 1 ]; [[ "$output" == *"relative path inside the repo"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"relative path inside the repo"* ]] || return 1
   run infra/recipes/docker-box/box/deploy.sh xenia "$(printf 'a%.0s' $(seq 1 40))" x.test/xenia/app:sha-1 .
   [ "$status" -eq 1 ]; [[ "$output" == *"owner/name"* ]]
 }

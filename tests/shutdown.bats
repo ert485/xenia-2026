@@ -21,7 +21,7 @@ entry() {
   entry "$SHUTDOWN_D" 30-c.sh 'echo "ran c"'
   run scripts/shutdown.sh
   [ "$status" -eq 1 ]
-  [[ "$output" == *"ran a"*"ran b"*"ran c"* ]]
+  [[ "$output" == *"ran a"*"ran b"*"ran c"* ]] || return 1
   [[ "$output" == *"1 failed: kit/20-b.sh"* ]]
 }
 
@@ -29,7 +29,7 @@ entry() {
   entry "$SHUTDOWN_D" 10-a.sh 'echo "ran a"'
   run scripts/shutdown.sh
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ran a"* ]]
+  [[ "$output" == *"ran a"* ]] || return 1
   [ "$(printf '%s\n' "$output" | grep -c '^team repo skipped: TEAM_REPO_DIR unset$')" -eq 1 ]
 }
 
@@ -47,7 +47,7 @@ entry() {
   entry "$TMP/team/shutdown.d" 40-t.sh 'echo "ran team"'
   TEAM_REPO_DIR="$TMP/team" run scripts/shutdown.sh
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ran kit"*"ran team"* ]]
+  [[ "$output" == *"ran kit"*"ran team"* ]] || return 1
   [[ "$output" != *"skipped"* ]]
 }
 
@@ -62,7 +62,7 @@ entry() {
   entry "$SHUTDOWN_D" 10-a.sh 'echo "ran a"'
   KIT_ENV_FILE="$TMP/missing.env" run scripts/shutdown.sh --offline
   [ "$status" -eq 0 ]
-  [[ "$output" == *"would run: "*"10-a.sh"* ]]
+  [[ "$output" == *"would run: "*"10-a.sh"* ]] || return 1
   [[ "$output" != *"ran a"* ]]
 }
 
@@ -85,7 +85,7 @@ entry() {
   : > "$TMP/calls"
   PATH="$TMP/bin:$PATH" KIT_ROOT="$TMP/kit" run "$TMP/kit/scripts/startup.sh" --no-gpu
   [ "$status" -eq 0 ]
-  [[ "$output" == *"run scripts/status.sh in five minutes"* ]]
+  [[ "$output" == *"run scripts/status.sh in five minutes"* ]] || return 1
   [ "$(grep -c 'gpu.sh' "$TMP/calls")" -eq 0 ]
   PATH="$TMP/bin:$PATH" KIT_ROOT="$TMP/kit" run "$TMP/kit/scripts/startup.sh"
   [ "$status" -eq 0 ]

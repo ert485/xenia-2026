@@ -31,7 +31,7 @@ verify() { (cd "$REPO" && "$KIT/scripts/ci/verify-pr.sh" "$BASE_SHA"); }
   git -C "$REPO" add -A && git -C "$REPO" commit -qm "docs"
   run verify
   [ "$status" -eq 0 ]
-  [[ "$output" == *"agent-verify: pass"* ]]
+  [[ "$output" == *"agent-verify: pass"* ]] || return 1
   [[ "$output" != *"::error"* ]]
 }
 
@@ -49,7 +49,7 @@ verify() { (cd "$REPO" && "$KIT/scripts/ci/verify-pr.sh" "$BASE_SHA"); }
   git -C "$REPO" add -A && git -C "$REPO" commit -qm "proof"
   run verify
   [ "$status" -eq 0 ]
-  [[ "$output" == *"::warning file=docs/proofs/2026-09-26-test.md::"* ]]
+  [[ "$output" == *"::warning file=docs/proofs/2026-09-26-test.md::"* ]] || return 1
   [[ "$output" != *"::error"* ]]
 }
 

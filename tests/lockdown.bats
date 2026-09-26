@@ -22,7 +22,7 @@ detach_calls() { grep -c "organizations detach-policy --policy-id p-lockdown1 --
 @test "lockdown attaches the SCP to the member account as personal-admin" {
   run scripts/lockdown.sh
   [ "$status" -eq 0 ]
-  [[ "$output" == *"lockdown: ON"* ]]
+  [[ "$output" == *"lockdown: ON"* ]] || return 1
   [ "$(attach_calls)" -eq 1 ]
   [ -f "$FAKE_STATE/scp-attached" ]
 }
@@ -31,7 +31,7 @@ detach_calls() { grep -c "organizations detach-policy --policy-id p-lockdown1 --
   scripts/lockdown.sh
   run scripts/lockdown.sh
   [ "$status" -eq 0 ]
-  [[ "$output" == *"already on"* ]]
+  [[ "$output" == *"already on"* ]] || return 1
   [ "$(attach_calls)" -eq 1 ]
 }
 
@@ -39,23 +39,23 @@ detach_calls() { grep -c "organizations detach-policy --policy-id p-lockdown1 --
   scripts/lockdown.sh
   run scripts/lockdown.sh --undo
   [ "$status" -eq 0 ]
-  [[ "$output" == *"lockdown: OFF"* ]]
+  [[ "$output" == *"lockdown: OFF"* ]] || return 1
   [ "$(detach_calls)" -eq 1 ]
   run scripts/lockdown.sh --undo
   [ "$status" -eq 0 ]
-  [[ "$output" == *"already off"* ]]
+  [[ "$output" == *"already off"* ]] || return 1
   [ "$(detach_calls)" -eq 1 ]
 }
 
 @test "--dry-run changes nothing in either direction" {
   run scripts/lockdown.sh --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"would attach"* ]]
+  [[ "$output" == *"would attach"* ]] || return 1
   [ "$(attach_calls)" -eq 0 ]
   touch "$FAKE_STATE/scp-attached"
   run scripts/lockdown.sh --undo --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"would detach"* ]]
+  [[ "$output" == *"would detach"* ]] || return 1
   [ "$(detach_calls)" -eq 0 ]
 }
 
@@ -63,20 +63,20 @@ detach_calls() { grep -c "organizations detach-policy --policy-id p-lockdown1 --
   rm -f "$FAKE_STATE/scp"
   run scripts/lockdown.sh
   [ "$status" -eq 1 ]
-  [[ "$output" == *"scripts/tf.sh org apply"* ]]
+  [[ "$output" == *"scripts/tf.sh org apply"* ]] || return 1
   [ "$(attach_calls)" -eq 0 ]
 }
 
 @test "it refuses a personal-admin profile that resolves to another account" {
   FAKE_ACCOUNT="$MEMBER_ID" run scripts/lockdown.sh
   [ "$status" -eq 1 ]
-  [[ "$output" == *"different account"* ]]
+  [[ "$output" == *"different account"* ]] || return 1
   [ "$(attach_calls)" -eq 0 ]
 }
 
 @test "it never prints an account ID" {
   run scripts/lockdown.sh
-  [[ ! "$output" =~ [0-9]{12} ]]
+  [[ ! "$output" =~ [0-9]{12} ]] || return 1
   run scripts/lockdown.sh --undo
   [[ ! "$output" =~ [0-9]{12} ]]
 }

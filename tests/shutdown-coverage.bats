@@ -31,7 +31,7 @@ cover() { run "$KIT/scripts/ci/shutdown-coverage.sh" "$BASE" "$HEAD_SHA" "$BODY"
   mkdir -p infra && printf 'resource "aws_instance" "x" {}\n' > infra/x.tf && commit
   cover
   [ "$status" -eq 1 ]
-  [[ "$output" == *"infra/x.tf"* ]]
+  [[ "$output" == *"infra/x.tf"* ]] || return 1
   [[ "$output" == *"must either touch that repo's shutdown.d/"* ]]
 }
 

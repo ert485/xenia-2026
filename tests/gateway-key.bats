@@ -77,7 +77,7 @@ EOF
 @test "revoke of an unknown alias fails without deleting" {
   run scripts/gateway-key.sh revoke nobody
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no key with alias nobody"* ]]
+  [[ "$output" == *"no key with alias nobody"* ]] || return 1
   ! grep -q '/key/delete' "$CURL_CALLS"
 }
 

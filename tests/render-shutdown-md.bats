@@ -14,10 +14,10 @@ entry() {
   entry 10-gpu.sh 'the GPU box' erik 'scripts/gpu.sh start' 'about $1.86/hour'
   run scripts/render-shutdown-md.sh "$D"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"| Entry | Stops | Added by | Restore | Cost when running |"* ]]
+  [[ "$output" == *"| Entry | Stops | Added by | Restore | Cost when running |"* ]] || return 1
   rows="$(printf '%s\n' "$output" | grep '^| `')"
   [ "$(printf '%s\n' "$rows" | wc -l | tr -d ' ')" -eq 2 ]
-  [[ "$(printf '%s\n' "$rows" | head -1)" == '| `10-gpu.sh` | the GPU box | erik | scripts/gpu.sh start | about $1.86/hour |' ]]
+  [[ "$(printf '%s\n' "$rows" | head -1)" == '| `10-gpu.sh` | the GPU box | erik | scripts/gpu.sh start | about $1.86/hour |' ]] || return 1
   [[ "$(printf '%s\n' "$rows" | tail -1)" == *'the box \| and its disk'* ]]
 }
 

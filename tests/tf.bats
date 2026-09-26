@@ -24,7 +24,7 @@ setup() {
 @test "tf.sh exports TF_VAR_member_account_id and masks output" {
   FAKE_ACCOUNT="$MEMBER_ID" run scripts/tf.sh platform plan
   [ "$status" -eq 0 ]
-  [[ "$output" == *"args=-chdir="*"/infra/platform plan"* ]]
+  [[ "$output" == *"args=-chdir="*"/infra/platform plan"* ]] || return 1
   [[ "$output" == *"acct=<account-id>"* ]]
 }
 
@@ -41,7 +41,7 @@ setup() {
   printf 'MEMBER_ACCOUNT_ID=%s\nMANAGEMENT_ACCOUNT_ID=%s\nZONE_ID=ZFAKEZONE\n' "$MANAGEMENT_ID" "$MANAGEMENT_ID" > "$TMP/kit-org-ok.env"
   KIT_ENV_FILE="$TMP/kit-org-ok.env" FAKE_ACCOUNT="$MANAGEMENT_ID" run scripts/tf.sh org plan
   [ "$status" -eq 0 ]
-  [[ "$output" == *"key=FAKEKEY-configure export-credentials --profile cohack --format env"* ]]
+  [[ "$output" == *"key=FAKEKEY-configure export-credentials --profile cohack --format env"* ]] || return 1
   [[ "$output" != *"FAKESECRET"* ]]
 }
 
@@ -62,7 +62,7 @@ setup() {
 @test "tf.sh dies if credential export fails, and never invokes terraform" {
   FAKE_ACCOUNT="$MEMBER_ID" FAKE_EXPORT_CREDS_FAIL=1 run scripts/tf.sh platform plan
   [ "$status" -ne 0 ]
-  [[ "$output" == *"could not export credentials for profile cohack"* ]]
-  [[ "$output" != *"cwd="* ]]
+  [[ "$output" == *"could not export credentials for profile cohack"* ]] || return 1
+  [[ "$output" != *"cwd="* ]] || return 1
   [[ "$output" != *"args="* ]]
 }

@@ -48,7 +48,7 @@ status_json() { jq -r "$1" "$REPO/.agent/STATUS.json"; }
 
   verify
   [ "$status" -eq 0 ]
-  [[ "$output" == *"agent-verify: pass"* ]]
+  [[ "$output" == *"agent-verify: pass"* ]] || return 1
   [ "$(status_json .status)" = "pass" ]
   [ "$(status_json .commit)" = "$head_sha" ]
   [ "$(status_json .base)" = "$base_sha" ]
@@ -65,7 +65,7 @@ status_json() { jq -r "$1" "$REPO/.agent/STATUS.json"; }
   [ "$status" -eq 1 ]
   [ "$(status_json '[.reasons[] | select(.check=="proofs-unbacked")] | length')" -eq 1 ]
   msg=$(status_json '.reasons[] | select(.check=="proofs-unbacked") | .message')
-  [[ "$msg" == *"docs/proofs/2026-09-25-status.md"* ]]
+  [[ "$msg" == *"docs/proofs/2026-09-25-status.md"* ]] || return 1
 
   mkdir -p "$REPO/.agent-requests"
   echo "backed by docs/proofs/2026-09-25-status.md" > "$REPO/.agent-requests/001-status.result.md"
@@ -100,8 +100,8 @@ status_json() { jq -r "$1" "$REPO/.agent/STATUS.json"; }
   [ "$status" -eq 1 ]
   [ "$(status_json '[.reasons[] | select(.check=="make-check")] | length')" -eq 1 ]
   make_msg=$(status_json '.reasons[] | select(.check=="make-check") | .message')
-  [[ "$make_msg" == "Makefile:"* ]]
-  [[ "$make_msg" == *"2"* ]]
+  [[ "$make_msg" == "Makefile:"* ]] || return 1
+  [[ "$make_msg" == *"2"* ]] || return 1
   [ -f "$REPO/.agent/make-check.log" ]
 
   [ "$(status_json '[.warnings[] | select(.check=="failure-hiding")] | length')" -eq 1 ]
@@ -250,6 +250,6 @@ EOF
   run "$KIT/plugin/scripts/agent-verify.sh" --help
   [ "$status" -eq 0 ]
   for c in make-check proofs-unbacked empty-files root-files failure-hiding scripts-without-tests uncommitted-changes; do
-    [[ "$output" == *"$c"* ]]
+    [[ "$output" == *"$c"* ]] || return 1
   done
 }
