@@ -17,7 +17,9 @@
 # shown with control characters (ANSI/terminal escapes included) made visible first, so a request
 # can't spoof what's on screen before the yes/no answer. Writes under docs/proofs/ and
 # .agent-requests/ are refused rather than followed through a pre-existing symlink anywhere in
-# their path.
+# their path. A single request that can't even get a result written for it (its own result path
+# planted as a symlink, say) is logged and skipped, never fatal: one bad request can't take down
+# the rest of a pass or end a `watch` daemon.
 # shellcheck disable=SC2016
 # (throughout: single-quoted printf formats below contain literal ``` fences, not command
 # substitution; shellcheck can't tell backticks are inert inside single quotes)
@@ -181,10 +183,21 @@ print_request() {
   printf '=== end request ===\n'
 }
 
+# note_result_write_failed <title>: the one visible line every write_result call site prints when
+# write_result refuses (returns 1) instead of writing — most likely because the agent planted a
+# symlink at the result path. Never swallowed silently: a refused result is loud, and the request
+# it belongs to is simply skipped so the rest of the pass (or the watch daemon) keeps going.
+note_result_write_failed() {
+  log "agent-requests: could not write a result for $1 (its result path may already exist as a symlink); skipping this request"
+}
+
 # write_result <result-file> <title> <status> <reason> <command> <exit-code> <output> <proof-path>
 # Never overwrites an existing result file, and never writes through a pre-existing symlink at the
 # result path: a request without a result is still pending, but once a result exists (or the path
-# is already a symlink someone planted) it is left alone.
+# is already a symlink someone planted) it is left alone. Every call site guards this with
+# `if ! write_result ...; then note_result_write_failed ...; fi`: under `set -e`, an unguarded call
+# that returns 1 here would otherwise kill the whole `once` pass, or end the `watch` daemon for
+# good — one planted symlink would let the agent switch off its own broker.
 write_result() {
   local result_file="$1" title="$2" status="$3" reason="$4" command="$5"
   local exit_code="$6" output="$7" proof_path="$8"
@@ -322,7 +335,9 @@ run_command() {
     fi
   fi
 
-  write_result "$result_file" "$title" "ran" "$proof_note" "$command" "$exit_code" "$masked_output" "$proof_path"
+  if ! write_result "$result_file" "$title" "ran" "$proof_note" "$command" "$exit_code" "$masked_output" "$proof_path"; then
+    note_result_write_failed "$title"
+  fi
   log "agent-requests: ran $title (exit $exit_code)"
 }
 
@@ -340,34 +355,51 @@ process_request() {
 
   [ -e "$result_file" ] && return 0
 
+  # The symlink check and the read below (read_request_once) are two separate syscalls, not one
+  # atomic open: portable bash has no O_NOFOLLOW. A sub-millisecond swap of the request file for a
+  # symlink between them is a residual race this can't fully close; reading the file exactly once
+  # right after this check (rather than the ~8 separate reopens the pre-hardening version did,
+  # including one after the approved command had already run) is what keeps that window as small
+  # as it can be made in portable shell.
   if [ -L "$file" ]; then
-    write_result "$result_file" "$title" "declined" "refused: request file is a symlink" "" "" "" ""
+    if ! write_result "$result_file" "$title" "declined" "refused: request file is a symlink" "" "" "" ""; then
+      note_result_write_failed "$title"
+    fi
     return 0
   fi
   if [ ! -f "$file" ]; then
-    write_result "$result_file" "$title" "declined" "refused: request file is not a regular file" "" "" "" ""
+    if ! write_result "$result_file" "$title" "declined" "refused: request file is not a regular file" "" "" "" ""; then
+      note_result_write_failed "$title"
+    fi
     return 0
   fi
 
   slug="${base#[0-9][0-9][0-9]-}"
   slug="${slug%.md}"
   if [[ ! "$slug" =~ ^[a-z0-9-]+$ ]]; then
-    write_result "$result_file" "$title" "declined" "refused: slug is outside [a-z0-9-]" "" "" "" ""
+    if ! write_result "$result_file" "$title" "declined" "refused: slug is outside [a-z0-9-]" "" "" "" ""; then
+      note_result_write_failed "$title"
+    fi
     return 0
   fi
 
-  # Read the request exactly once, right next to the symlink/regular-file check above. Every
-  # parser from here on works on this in-memory text and never reopens $file again.
+  # Read the request exactly once (see the residual-race note above), right next to the
+  # symlink/regular-file check. Every parser from here on works on this in-memory text and never
+  # reopens $file again.
   read_rc=0
   read_request_once "$file" || read_rc=$?
   case "$read_rc" in
     0) : ;;
     2)
-      write_result "$result_file" "$title" "declined" "refused: request file is larger than the 64 KB limit" "" "" "" ""
+      if ! write_result "$result_file" "$title" "declined" "refused: request file is larger than the 64 KB limit" "" "" "" ""; then
+        note_result_write_failed "$title"
+      fi
       return 0
       ;;
     *)
-      write_result "$result_file" "$title" "declined" "refused: could not read request file" "" "" "" ""
+      if ! write_result "$result_file" "$title" "declined" "refused: could not read request file" "" "" "" ""; then
+        note_result_write_failed "$title"
+      fi
       return 0
       ;;
   esac
@@ -376,24 +408,32 @@ process_request() {
   # ok-to-hide: grep -c exits 1 on a zero count, a normal result the next check treats explicitly.
   fences="$(grep -c '^```' <<<"$content" || true)"
   if [ "$fences" -eq 0 ]; then
-    write_result "$result_file" "$title" "declined" "refused: no Command code block found" "" "" "" ""
+    if ! write_result "$result_file" "$title" "declined" "refused: no Command code block found" "" "" "" ""; then
+      note_result_write_failed "$title"
+    fi
     return 0
   fi
   if [ "$fences" -ne 2 ]; then
-    write_result "$result_file" "$title" "declined" "refused: unbalanced or extra code fences" "" "" "" ""
+    if ! write_result "$result_file" "$title" "declined" "refused: unbalanced or extra code fences" "" "" "" ""; then
+      note_result_write_failed "$title"
+    fi
     return 0
   fi
 
   command="$(extract_first_fence_from_text "$content")"
 
   if has_bad_control_chars "$command"; then
-    write_result "$result_file" "$title" "declined" "refused: command contains a control character other than tab or newline" "" "" "" ""
+    if ! write_result "$result_file" "$title" "declined" "refused: command contains a control character other than tab or newline" "" "" "" ""; then
+      note_result_write_failed "$title"
+    fi
     return 0
   fi
 
   cmdlen="${#command}"
   if [ "$cmdlen" -gt 2000 ]; then
-    write_result "$result_file" "$title" "declined" "refused: command is $cmdlen characters, over the 2000 limit" "" "" "" ""
+    if ! write_result "$result_file" "$title" "declined" "refused: command is $cmdlen characters, over the 2000 limit" "" "" "" ""; then
+      note_result_write_failed "$title"
+    fi
     return 0
   fi
 
@@ -408,7 +448,9 @@ process_request() {
     reason="$ASK_TTY_ANSWER"
     full_reason="declined by operator"
     [ -n "$reason" ] && full_reason="$full_reason: $reason"
-    write_result "$result_file" "$title" "declined" "$full_reason" "$command" "" "" ""
+    if ! write_result "$result_file" "$title" "declined" "$full_reason" "$command" "" "" ""; then
+      note_result_write_failed "$title"
+    fi
     return 0
   fi
 
@@ -444,7 +486,11 @@ process_all() {
   shopt -s nullglob
   while IFS= read -r req; do
     [ -n "$req" ] || continue
-    process_request "$workspace" "$req"
+    # Any per-request failure — a refused result write already logs its own line above, anything
+    # else logs here — is skipped, not fatal: the next request in this pass still gets processed.
+    if ! process_request "$workspace" "$req"; then
+      log "agent-requests: error while processing $(basename "$req"); skipping and continuing"
+    fi
   done < <(find_pending "$resolved_dir")
   shopt -u nullglob
 }
@@ -459,13 +505,17 @@ main() {
   [ -d "$workspace" ] || die "workspace directory not found: $workspace"
 
   if [ "$mode" = "once" ]; then
-    process_all "$workspace"
+    if ! process_all "$workspace"; then
+      log "agent-requests: error during this pass"
+    fi
     exit 0
   fi
 
   log "agent-requests: watching $workspace/.agent-requests every 5s (ctrl-c to stop)"
   while true; do
-    process_all "$workspace"
+    if ! process_all "$workspace"; then
+      log "agent-requests: error during this pass; still watching"
+    fi
     sleep 5
   done
 }

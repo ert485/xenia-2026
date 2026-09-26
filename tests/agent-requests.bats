@@ -258,3 +258,19 @@ write_request() {
   [ "$(grep -c 'read_request_once "\$file"' "$SCRIPT")" -eq 1 ] || return 1
   ! grep -qE 'extract_(section|first_fence|proof_path)_from_text[^)]*"\$file"' "$SCRIPT"
 }
+
+# --- Fix round 2: a refused result write must not take down the whole pass ---
+
+@test "a dangling symlink at one request's result path is skipped, not fatal; the next request still runs" {
+  ln -s "$BATS_TEST_TMPDIR/nonexistent-target.md" "$WS/.agent-requests/001-broken.result.md"
+  write_request "$WS/.agent-requests/001-broken.md" 'echo should-not-matter' "t" "read-only" "t" "t" "t"
+  write_request "$WS/.agent-requests/002-ok.md" 'echo second-request-ran' "t" "read-only" "t" "t" "t"
+  printf 'y\ny\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/nonexistent-target.md" ]
+  grep -qF -- 'second-request-ran' "$WS/.agent-requests/002-ok.result.md" || return 1
+  [[ "$output" == *'could not write a result for 001-broken'* ]] || return 1
+  [[ "$output" == *'ran 002-ok'* ]]
+}
