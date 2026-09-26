@@ -1,0 +1,14 @@
+schemaVersion: "2.2"
+description: "Remove one pull request's preview, or all of them, from the Docker box (kit, spec section 9)."
+parameters:
+  Pr:
+    type: String
+    description: "Pull request number, or all"
+    allowedPattern: "^([0-9]{1,6}|all)$"
+mainSteps:
+  - action: aws:runShellScript
+    name: previewDown
+    inputs:
+      timeoutSeconds: "600"
+      runCommand:
+        - /srv/kit/infra/recipes/docker-box/box/preview-down.sh "{{ Pr }}"
