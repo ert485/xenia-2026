@@ -42,6 +42,16 @@ check_compose_contract "$compose" || die "compose contract failed"
 registry="${image%%/*}"
 aws ecr get-login-password --region ca-central-1 | docker login --username AWS --password-stdin "$registry" >/dev/null
 
+# App secrets and settings: every /xenia/app/<NAME> parameter (written from the laptop with
+# scripts/put-secret.sh app/<NAME>) becomes NAME in the environment compose renders the team's file
+# with. The value never touches the disk or a command line. No parameters: nothing is exported.
+# Exported once, here, so deploy_image below runs with them for both the deploy and the revert.
+while IFS=$'\t' read -r name value; do
+  [[ -n "$name" ]] || continue
+  export "${name##*/}=$value"
+done < <(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption \
+  --query 'Parameters[].[Name,Value]' --output text)
+
 dc() { docker compose -p app --project-directory "$dir" -f "$compose" -f "$here/../app/compose.app.yml" "$@"; }
 
 # deploy_image <image>: pull and bring <image> up as app-web. Just the compose steps, no bookkeeping
