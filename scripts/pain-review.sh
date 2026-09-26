@@ -52,6 +52,7 @@ count="$(jq length "$work/prs.json")"
 for ((i = 0; i < count; i++)); do
   num="$(jq -r ".[$i].number" "$work/prs.json")"
   jq -r ".[$i].body // \"\"" "$work/prs.json" > "$work/body.txt"
+  # # ok-to-hide: rule-feedback.sh can fail on malformed inputs but we want to continue processing
   "$rf" "$work/body.txt" 2>/dev/null | while IFS=$'\t' read -r slug reason; do
     printf '%s\tPR\t%s\t%s\n' "$slug" "$num" "$reason"
   done >> "$work/rows.tsv"
@@ -61,6 +62,7 @@ for ((i = 0; i < count; i++)); do
   num="$(jq -r ".[$i].number" "$work/rf-issues.json")"
   title="$(jq -r ".[$i].title" "$work/rf-issues.json")"
   jq -r ".[$i].body // \"\"" "$work/rf-issues.json" > "$work/body.txt"
+  # # ok-to-hide: rule-feedback.sh can fail on malformed inputs but we want to continue processing
   found="$("$rf" "$work/body.txt" 2>/dev/null || true)"
   if [[ -n "$found" ]]; then
     printf '%s\n' "$found" | while IFS=$'\t' read -r slug reason; do
@@ -68,6 +70,7 @@ for ((i = 0; i < count; i++)); do
     done >> "$work/rows.tsv"
   else
     # Issue form: the slug is the dropdown answer; the title is the reason.
+    # # ok-to-hide: grep can fail if no P- rule is found, but we want to continue with "unknown" slug
     slug="$(tr -d '\r' < "$work/body.txt" | grep -oE '(^|[^A-Za-z0-9])P-[a-z-]+' | head -1 | grep -oE 'P-[a-z-]+' || true)"
     printf '%s\tissue\t%s\t%s\n' "${slug:-unknown}" "$num" "$title" >> "$work/rows.tsv"
   fi
@@ -110,6 +113,7 @@ if (( use_model )); then
   elif claude -p "$(cat "$prompt")" --output-format json --max-turns 2 \
          --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Read,Grep,Glob" \
          < "$work/input.json" > "$work/model.json" 2> "$work/model.err"; then
+    # # ok-to-hide: python script can fail but we want to fall back gracefully to deterministic grouping
     python3 - "$work/model.json" > "$work/answer.json" <<'PY' || true
 import json, sys
 try:
