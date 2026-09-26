@@ -1,26 +1,28 @@
 # 03: Thursday bootstrap
 
-Status: **skeleton** — Task 3 wrote this page's bootstrap step; Task 7 appends the SMS sandbox
-verification; Task 21 writes the full page.
+Status: **done** Thursday 2026-09-24 (this page records the order, for a rebuild).
 
-1. `scripts/bootstrap.sh`: state bucket, lock table, `infra/backend.local.hcl`.
+Erik: each `apply` asks for a typed `yes`. Values come from `kit.local.env` (gitignored); nothing here needs an ID typed in.
 
-Verify:
+1. Copy `kit.local.env.example` to `kit.local.env` and fill it in from the project memory note.
+2. `scripts/bootstrap.sh`: state bucket, lock table, `infra/backend.local.hcl`.
+3. `scripts/tf.sh org init && scripts/tf.sh org apply`: the `hackathon` group, permission set, budgets, alert topic. Click the confirmation link in the SNS email.
+4. `scripts/tf.sh platform init`, import the existing zone (`scripts/tf.sh platform import aws_route53_zone.this "$(awk -F= '/^ZONE_ID/ {print $2}' kit.local.env)"`), then `scripts/tf.sh platform apply`.
+5. `scripts/tf.sh recipes/docker-box init && scripts/tf.sh recipes/docker-box apply`, then seed the gateway secrets:
 
-    aws s3api get-bucket-versioning --bucket "$(awk -F'"' '/^bucket/ {print $2}' infra/backend.local.hcl)" --profile cohack
+        scripts/put-secret.sh gateway/master-key "sk-$(openssl rand -hex 32)"
+        scripts/put-secret.sh gateway/postgres-password "$(openssl rand -hex 24)"
+        scripts/box.sh xenia-gateway Action=restart
 
-Expected: `Enabled`.
+6. Confirm the `xenia-gateway-alarm` email subscription, and verify the alarm phone in the **member** account's us-east-1 SMS sandbox (the health-check metric lives there, and each account and region has its own sandbox). Type the number at the prompt; it is never written to a file:
 
-## Task 7: gateway alarm SMS sandbox verification
+        read -r -p "alarm phone (E.164): " ALARM_PHONE
+        aws sns create-sms-sandbox-phone-number --phone-number "$ALARM_PHONE" --language-code en-US --profile cohack --region us-east-1
+        read -r -p "code from the SMS: " OTP
+        aws sns verify-sms-sandbox-phone-number --phone-number "$ALARM_PHONE" --one-time-password "$OTP" --profile cohack --region us-east-1
+        unset ALARM_PHONE OTP
 
-The gateway health alarm lives in us-east-1 (Route 53 health-check metrics only exist there), but
-that region has no SMS origination identity in the member account, so SMS delivery is relayed
-through a ca-central-1 topic instead. Verify the alert phone number in ca-central-1's SMS sandbox:
+7. `scripts/tf.sh recipes/gpu-box init && scripts/tf.sh recipes/gpu-box apply`, then `scripts/box.sh xenia-gateway Action=restart` so the gateway reads the GPU's address and token.
+8. `scripts/tf.sh examples/kit-site init && scripts/tf.sh examples/kit-site apply`, then set the site's two publish secrets, `KIT_SITE_BUCKET` and `KIT_SITE_DISTRIBUTION_ID`, from its outputs.
 
-    aws sns create-sms-sandbox-phone-number --phone-number "<alert-sms>" --language-code en-US --profile cohack --region ca-central-1
-    aws sns verify-sms-sandbox-phone-number --phone-number "<alert-sms>" --one-time-password <code-from-the-text> --profile cohack --region ca-central-1
-
-Expected: `aws sns list-sms-sandbox-phone-numbers --profile cohack --region ca-central-1 --query 'PhoneNumbers[].Status'` returns `Verified`.
-
-A night-shift teammate's number is verified the same way, still in ca-central-1: swap in their
-`+1` number for `<alert-sms>` and repeat both commands.
+Expect the `$10` budget notification by email and SMS on Thursday afternoon: it is the canary that proves the alerts are wired.
