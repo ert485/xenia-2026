@@ -1,0 +1,70 @@
+# pr-template-check (Should tier; shipped as a template, not proven end to end unless
+# docs/proofs/2026-09-25-pain-review.md exists in the kit). Advisory: comments once when the PR body lacks
+# the Rule-feedback: line or the Shutdown: line from the PR template. Never fails a PR (P-two-gates).
+name: pr-template-check
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+permissions: {}
+concurrency:
+  group: pr-template-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  pr-template-check:
+    name: pr-template-check
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: fetch the shared rule-feedback parser from the kit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ert485/xenia-2026
+          ref: ${{ vars.KIT_REF || 'main' }}
+          path: kit
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+      - name: look for the two template lines
+        id: lines
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$PR_BODY" > body.txt
+          rf=no; sd=no
+          if [ -n "$(kit/scripts/ci/rule-feedback.sh --all body.txt 2>/dev/null)" ]; then rf=yes; fi
+          if kit/scripts/ci/rule-feedback.sh --lines body.txt | grep -qE '^Shutdown:[[:space:]]*none needed because[[:space:]]+[^[:space:]]'; then sd=yes; fi
+          if gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename' | grep -q '^shutdown\.d/'; then sd=yes; fi
+          echo "rule_feedback=$rf" >> "$GITHUB_OUTPUT"
+          echo "shutdown=$sd" >> "$GITHUB_OUTPUT"
+      - name: comment once
+        if: steps.lines.outputs.rule_feedback == 'no' || steps.lines.outputs.shutdown == 'no'
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+          RF: ${{ steps.lines.outputs.rule_feedback }}
+          SD: ${{ steps.lines.outputs.shutdown }}
+        run: |
+          marker='<!-- xenia-pr-template -->'
+          if gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq '.[].body' | grep -qF "$marker"; then
+            echo "already commented on this PR; the bot comments only once"
+            exit 0
+          fi
+          {
+            echo "$marker"
+            echo "Bot: this PR's description is missing a line from the PR template. This is advisory and never blocks a merge (P-two-gates)."
+            echo
+            if [ "$RF" = no ]; then
+              echo "- **Rule feedback:** add \`Rule-feedback: none\`, or \`Rule-feedback: P-<slug>, <what you did differently and why>\` if this PR knowingly bends a rule. It is feedback on the rule, never on a person (P-ours)."
+            fi
+            if [ "$SD" = no ]; then
+              echo "- **Shutdown:** add \`Shutdown: none needed because <reason>\`, or add an entry under \`shutdown.d/\` if this PR starts something billable (P-off-switch). The \`shutdown-coverage\` check blocks billable PRs that have neither."
+            fi
+            echo
+            echo "Teammate: each line must start at the beginning of a line in the description, outside code blocks."
+          } > comment.md
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@comment.md >/dev/null
