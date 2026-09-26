@@ -69,7 +69,7 @@ write_request() {
   AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
   [ "$status" -eq 0 ]
   [[ "$output" != *'Run this command?'* ]] || return 1
-  grep -qF -- 'more than one command code block' "$WS/.agent-requests/004-twocmd.result.md"
+  grep -qF -- 'unbalanced or extra code fences' "$WS/.agent-requests/004-twocmd.result.md"
 }
 
 @test "a request with a slug outside [a-z0-9-] is refused without prompting" {
@@ -173,4 +173,88 @@ write_request() {
   [ "$status" -eq 2 ]
   run "$SCRIPT" once
   [ "$status" -eq 2 ]
+}
+
+# --- Fix round 1: TOCTOU, symlink-escape, and display-spoofing hardening ---
+
+@test "a non-regular request file (a fifo) is refused without prompting" {
+  mkfifo "$WS/.agent-requests/017-fifo.md"
+
+  AGENT_REQUESTS_TTY="$TTY" run timeout 10 "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'Run this command?'* ]] || return 1
+  grep -qF -- 'not a regular file' "$WS/.agent-requests/017-fifo.result.md"
+}
+
+@test "a symlinked docs/proofs writes no file outside the workspace, and no proof is claimed" {
+  mkdir -p "$BATS_TEST_TMPDIR/outside"
+  mkdir -p "$WS/docs"
+  ln -s "$BATS_TEST_TMPDIR/outside" "$WS/docs/proofs"
+  write_request "$WS/.agent-requests/014-escape.md" 'echo "should not leave the workspace"' \
+    "t" "read-only" "t" "t" "Proof: docs/proofs/2026-09-26-escape-test.md"
+  printf 'y\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/outside/2026-09-26-escape-test.md" ]
+  result="$WS/.agent-requests/014-escape.result.md"
+  grep -qF -- '- Status: ran' "$result" || return 1
+  grep -qF -- 'proof not written' "$result" || return 1
+  grep -qF -- 'Proof written:' "$result" && return 1
+  true
+}
+
+@test "an ESC sequence in Why is shown escaped, not raw" {
+  local esc
+  esc=$'\x1b'
+  write_request "$WS/.agent-requests/012-esc-why.md" 'echo hi' \
+    "before${esc}[31mred${esc}[0mafter" "read-only" "t" "t" "t"
+  printf 'n\n\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'^[[31mred^[[0m'* ]]
+}
+
+@test "a Command block containing a raw ESC byte is refused without prompting" {
+  local esc file
+  esc=$'\x1b'
+  file="$WS/.agent-requests/013-esc-cmd.md"
+  {
+    printf '**Command**\n\n```bash\necho hi%s\n```\n\n' "$esc"
+    printf '**Why**\n\nt\n'
+  } > "$file"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'Run this command?'* ]] || return 1
+  grep -qF -- 'control character' "$WS/.agent-requests/013-esc-cmd.result.md"
+}
+
+@test "the prompt shows where the proof will be written, before asking y/N" {
+  write_request "$WS/.agent-requests/015-proofprompt.md" 'echo hi' \
+    "t" "read-only" "t" "t" "Proof: docs/proofs/2026-09-26-prompt-test.md"
+  printf 'n\n\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'Proof will be written to: docs/proofs/2026-09-26-prompt-test.md'* ]]
+}
+
+@test "the prompt says no proof when the request names none" {
+  write_request "$WS/.agent-requests/016-noproof.md" 'echo hi' "t" "read-only" "t" "t" "nothing else"
+  printf 'n\n\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'this request writes no proof'* ]]
+}
+
+@test "structural: the request is read once into memory; parsers work from text, not the path" {
+  # A real TOCTOU race (the agent swapping the request file for a symlink mid-run) isn't
+  # practical to trigger deterministically in bats, so this asserts the shape of the fix instead:
+  # exactly one read of the path, and every extractor taking in-memory text afterward.
+  grep -qF 'read_request_once() {' "$SCRIPT" || return 1
+  [ "$(grep -c 'read_request_once "\$file"' "$SCRIPT")" -eq 1 ] || return 1
+  ! grep -qE 'extract_(section|first_fence|proof_path)_from_text[^)]*"\$file"' "$SCRIPT"
 }
