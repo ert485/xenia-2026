@@ -1,0 +1,45 @@
+name: Rule feedback
+description: You knowingly did something differently from one of the team's rules and there is no PR to put the line in.
+title: "Rule feedback: "
+labels: [rule-feedback]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Teammate: this is feedback on the rule, never on a person. The pile is only used to decide, as a
+        team, whether a rule stays, changes, or the code is brought back in line. We look at it at 18:00
+        and at the retro.
+  - type: dropdown
+    id: rule
+    attributes:
+      label: Which rule
+      options:
+        - P-ours
+        - P-fix-once
+        - P-two-gates
+        - P-off-switch
+        - P-wheel
+        - P-public
+        - P-who
+        - P-comms
+        - P-fix-once/claude-md
+        - P-skills
+        - P-contracts
+        - P-evals
+        - P-real-url
+        - P-no-clickops
+        - P-clock
+        - P-public/commit
+        - P-public/site
+        - P-public/contacts
+        - P-public/leak
+        - P-public/agents
+        - P-public/ci
+    validations:
+      required: true
+  - type: textarea
+    id: what-instead
+    attributes:
+      label: What you did instead and why
+    validations:
+      required: true

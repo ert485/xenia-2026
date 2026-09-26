@@ -1,0 +1,7 @@
+# Kit code owner. The kit repo has one maintainer; this marks the rules files for review requests.
+# Narrowed to match the team-repo template (Erik's decision, 2026-09-24): only the rules files ask
+# for review; workflows, dev container, plugin, Makefile, and compose files change too often mid-event
+# to gate behind a review request.
+/team-kit/PRINCIPLES.md            @ert485
+/team-kit/PRINCIPLES-EXTENDED.md   @ert485
+/.github/CODEOWNERS                @ert485
