@@ -109,13 +109,13 @@ jobs:
         run: |
           case "$MODE" in
             consistency) prompt=.kit/templates/review/consistency-prompt.md ;;
-            *) prompt=.kit/templates/review/review-prompt.md ;;
+            *) prompt=".kit/$REVIEW_PROMPT" ;;
           esac
           set +e
           claude -p "$(cat "$prompt")" \
             --allowedTools "Read,Grep,Glob" \
             --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task" \
-            --max-turns 40 --output-format json > review.json 2> claude.err
+            --max-turns "$REVIEW_MAX_TURNS" --output-format json > review.json 2> claude.err
           rc=$?
           set -e
           if [ "$rc" -ne 0 ] || ! jq -e '.result | strings | length > 0' review.json > /dev/null 2>&1; then
@@ -125,6 +125,7 @@ jobs:
           fi
           {
             echo '<!-- xenia-pr-review -->'
+            # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
             echo 'Bot review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
             if [ "$MODE" = consistency ]; then echo 'Mode: consistency (this PR changes the team rules).'; fi
             echo
