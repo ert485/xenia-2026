@@ -48,7 +48,7 @@ sync-workflows: ## the kit runs its own templates; check.yml is kit-specific and
 	@for f in shutdown-coverage render-shutdown-md pr-review; do [ -f templates/workflows/$$f.yml ] && cp templates/workflows/$$f.yml .github/workflows/$$f.yml; done; true
 
 shutdown-md:
-	scripts/render-shutdown-md.sh > SHUTDOWN.md
+	scripts/render-shutdown-md.sh shutdown.d > SHUTDOWN.md.tmp && mv SHUTDOWN.md.tmp SHUTDOWN.md
 
 shutdown-md-check:
-	@if [ -x scripts/render-shutdown-md.sh ]; then scripts/render-shutdown-md.sh | diff -u SHUTDOWN.md - || { echo "SHUTDOWN.md is stale: run make shutdown-md"; exit 1; }; fi
+	@if [ -x scripts/render-shutdown-md.sh ]; then scripts/render-shutdown-md.sh shutdown.d | diff -u SHUTDOWN.md - || { echo "SHUTDOWN.md is stale: run make shutdown-md"; exit 1; }; fi
