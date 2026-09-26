@@ -1,0 +1,11 @@
+# Kit override for previews: names the routable container pr-<n>-web, attaches it to the edge
+# network Caddy reads, and drops any published ports. PR comes from preview-up.sh.
+services:
+  web:
+    container_name: pr-${PR}-web
+    restart: unless-stopped
+    networks: [default, edge]
+    ports: !reset []
+networks:
+  edge:
+    external: true
