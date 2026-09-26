@@ -35,7 +35,10 @@ jobs:
           iid="$(aws ssm describe-instance-information \
             --filters "Key=tag:xenia-role,Values=docker-box" \
             --query 'InstanceInformationList[0].InstanceId' --output text)"
-          [ -n "$iid" ] && [ "$iid" != "None" ] || { echo "::error::the Docker box is not online in SSM (stopped? scripts/startup.sh)"; exit 1; }
+          if [ -z "$iid" ] || [ "$iid" = "None" ]; then
+            echo "::error::the Docker box is not online in SSM (stopped? scripts/startup.sh)"
+            exit 1
+          fi
           params="$(jq -nc --arg pr "$PR" --arg repo "$GITHUB_REPOSITORY" --arg sha "$HEAD_SHA" --arg dir "$APP_DIR" \
             '{Pr:[$pr],Repo:[$repo],Sha:[$sha],AppDir:[$dir]}')"
           cid="$(aws ssm send-command --document-name xenia-preview-up --instance-ids "$iid" \
