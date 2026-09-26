@@ -97,7 +97,7 @@ Each preserves the spec's intent and its section 17 test. Erik reads these first
 12. **The team infra role's instance-type allow-list can't see inside launch templates or fleets** (Task 30, D39). IAM checks `ec2:InstanceType` on `RunInstances` and `ec2:Attribute/InstanceType` on `ModifyInstanceAttribute`, but no condition key exposes the type inside a launch template, EC2 Fleet, Spot Fleet, or Spot request. So instead of "deny those for types outside the list", the infra role is denied those launch paths outright; `aws_instance` works. Managed services that start their own instances (EKS node groups, Batch, EMR, SageMaker) are not covered; the budget alerts are the backstop. The spec's §7 says the same.
 13. **`infra/org` imports the organization to enable SCPs** (Task 14, D40). Terraform enables a policy type only through `aws_organizations_organization`, so the hand-made organization is imported with `prevent_destroy` and `ignore_changes` on trusted access and the feature set: an apply can add the SCP policy type and nothing else. Runbook 99 removes it from state before `teardown.sh --all`.
 14. **`CODEOWNERS` owns only the rules files, not the wider blast-radius set** (Erik's decision, 2026-09-24). `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, and `CODEOWNERS` itself are the only code-owned paths; `.github/workflows/`, `.devcontainer/`, the vendored plugin, `Makefile`, compose files, and `infra/team/**` all self-merge once `make check` and shutdown coverage pass. Rules edits are rare and a team agreement, worth a second reviewer; the other paths change often mid-event as agents fix CI, and a second-owner gate there added little given every member's near-admin AWS access. The residual risk (an agent tricked into leaking the gateway CI key or the Discord webhook) is covered by per-key budgets, one-step rotation, `gitleaks`, fork skip, and the reviewer ranking CI/secrets changes as a finding.
-15. **Task 31, the overnight self-improvement loop, is an addition, not in the spec** (Erik's decision, 2026-09-25). It uses the GPU box during hours it is paid for and idle (Friday 23:00 to Saturday 07:00), runs only on Erik's laptop and in firewalled containers with its own $5 key, and changes nothing teams see unless Erik adopts a result (Task 31 step 16). The cut `docs/deferred/evals-template.md` (Task 29) is a different thing, an eval harness for teams' own LLM features, and stays cut.
+15. **Task 31, the overnight self-improvement loop, is an addition, not in the spec** (Erik's decision, 2026-09-25). It restarts the GPU box for the night after Task 22's shutdown step (about nine hours of on-demand time, about $17, covered by `shutdown.d/10-gpu-box.sh`), runs only from Erik's laptop and in firewalled containers with its own $5 key, and changes nothing teams see unless Erik adopts a result (Task 31 step 16). The cut `docs/deferred/evals-template.md` (Task 29) is a different thing, an eval harness for teams' own LLM features, and stays cut.
 
 ## Review Focus
 
@@ -132,7 +132,7 @@ Input classes the spec implies but no task's tests would otherwise exercise, mos
 | Fri: team-repo rehearsal on `ert485/xenia-test-team` (Erik's follow-up, v2.6) | 22 steps 14 to 17 | first team-repo merge 200 on `app.` in under five minutes (success criterion 1 from a team repo, not only the kit); team-repo preview; team infra by PR if Task 30 landed; lockdown cuts a live session and a CI role, gateway stays up, `--undo` restores |
 | Fri: load test past capacity, EBS snapshot | 22 | `docs/proofs/2026-09-25-load-test.md` with tokens per second, queueing, watchdog result |
 | Fri evening: examples torn down, GPU box stopped, everything else up | 22 | `status.sh` shows Docker box up, GPU stopped, no previews |
-| Fri 23:00 to Sat 07:00: overnight self-improvement loop on the idle GPU box (Erik's decision, 2026-09-25; not in the spec) | 31 (dry run on Bedrock Friday afternoon, after 22 step 7; GPU box restarted 22:45) | `docs/proofs/2026-09-25-overnight-dry-run.md`; `docs/proofs/2026-09-26-overnight-loop.md` with the DEV curve, the plateau point, and held-out baseline against best; Erik's Saturday-defaults decision (31 step 16) |
+| Friday night to Saturday morning: overnight self-improvement loop on the GPU box (Erik's decision, 2026-09-25; not in the spec) | 31 (dry run on Bedrock Friday afternoon, after 22 step 7; GPU box restarted for the night after 22 step 20) | `docs/proofs/2026-09-25-overnight-dry-run.md`; `docs/proofs/2026-09-26-overnight-loop.md` with the DEV curve, the plateau point, and held-out baseline against best; Erik's Saturday-defaults decision (31 step 16) |
 | Sat 08:00: `gpu.sh start`, `status.sh` green | runbook 06 | |
 
 Anything in the Must tier not proven by Friday night is reported as such in `docs/proofs/README.md`, not left half-built. Should-tier items ship as templates with a "not proven" note in their README (spec §15).
@@ -16938,9 +16938,9 @@ Expected: the leak check prints nothing; `check` and `shutdown-coverage` green; 
 
 ### Task 31: Overnight self-improvement loop on the idle GPU box (Should tier; runs Friday, after Task 22's load test)
 
-Erik's decision (2026-09-25), made after spec v2.6, so no spec section owns it; the acceptance tables above map it. The GPU box is paid for by the hour from Friday 23:00 CST through the event whether or not anyone uses it (about $1.86 an hour, a g6e.xlarge). Overnight, a loop uses it: it runs a frozen set of small coding tasks through the team's own agent setup, forms a theory about what would raise the pass rate, changes one thing, measures again, and keeps the change only when it beats measured noise. The morning report answers one question: does the setup improve itself, or does it hit a ceiling, and where? Whatever wins on the held-out tasks is Erik's to adopt as the Saturday defaults (step 16). Should tier: Must-adjacent, because Saturday's defaults are Must, but nothing Saturday depends on the loop having run.
+Erik's decision (2026-09-25), made after spec v2.6, so no spec section owns it; the acceptance tables above map it. Task 22's last step leaves the GPU box stopped for the night; this loop restarts it (about nine hours of on-demand time at about $1.86 an hour for a g6e.xlarge, about $17, covered by `shutdown.d/10-gpu-box.sh`) and uses it. No model is trained or changed: the loop edits prompt files, skills, and vLLM serving settings for the team's own Claude Code setup, and Anthropic does not support Claude Code against non-Claude models through a gateway (spec D7), so problems on this path are ours. What the loop does: it runs a frozen set of small coding tasks through the team's own agent setup, forms a theory about what would raise the pass rate, changes one thing, measures again, and keeps the change only when it beats measured noise. The morning report answers one question: does the setup improve itself, or does it hit a ceiling, and where? Whatever wins on the held-out tasks is Erik's to adopt as the Saturday defaults (step 16). Should tier: Must-adjacent, because Saturday's defaults are Must, but nothing Saturday depends on the loop having run.
 
-It runs after Task 22 step 7 (the load test picks `max_num_seqs`, the loop's starting point) and after Task 22 step 20 (which leaves the GPU box stopped; step 14 below starts it again at 22:45).
+It runs after Task 22 step 7 (the load test picks `max_num_seqs`, the loop's starting point) and after Task 22 step 20 (which leaves the GPU box stopped; step 14 below starts it again for the night).
 
 **Files:**
 - Create: `scripts/lib/overnight.py`, `scripts/overnight.sh`, `tests/overnight.bats`, `evals/README.md`, `evals/selftest.sh`, `evals/judge.sha256`, `evals/runner/{judge.sh,lib.sh,agent-run.sh,strict-egress.sh}`, `evals/tasks/dev/{bugfix,feature,refactor,answer,multifile,shell}-0{1,2,3}.sh` (18), `evals/tasks/heldout/{bugfix,feature,refactor,answer,multifile,shell}-0{4,5}.sh` (12), `evals/harness/baseline/{knobs.json,HYPOTHESIS.md}`, `evals/prompts/{researcher.md,eval-author.md}`, `evals/proposed/README.md`
@@ -16967,7 +16967,7 @@ Decisions recorded here (judgment calls, Erik reviews them with the task):
 - **Sampling may be a no-op.** vLLM's `--override-generation-config` only sets defaults; if Claude Code sends `temperature` on every request, the request wins. The report lists sampling rounds like any other; if all of them land inside the noise, treat the knob as unverified, not as proven useless.
 - **The loop restores vLLM's defaults when it ends** (`gpu.sh model <default>`), so Saturday never starts on an experimental parser by accident. Adoption is a separate, human step (step 16).
 - **Eval refresh is a gated phase, off the first night.** When DEV scores stop improving for `--plateau` rounds (default 4), the loop does not touch its own judge. With `--eval-refresh`, a separate eval-author session (its own container, DEV tasks visible, held-out not) writes up to three new task families into `evals/proposed/<date>/`; each must pass the self-test, then the baseline harness must pass it on 20% to 80% of three tries (not trivial, not impossible). Survivors are only recorded: `scripts/overnight.sh admit <date>` adds them to DEV for a later night, through a reviewed PR. The held-out set never changes. The first night runs without it, for a clean ceiling measurement.
-- **No `shutdown.d/` entry.** The loop runs nothing billable of its own (containers on the laptop; tokens capped by the key's budget); `overnight.sh stop` is its off switch, and the GPU box it uses is covered by `shutdown.d/10-gpu-box.sh`.
+- **No new `shutdown.d/` entry.** The only billable thing the loop starts is the GPU box, already covered by `shutdown.d/10-gpu-box.sh`; its containers run on the laptop and its tokens are capped by the key's budget; `overnight.sh stop` is its off switch.
 
 - [ ] **Step 1: Write the failing `tests/overnight.bats`**
 
@@ -20560,13 +20560,13 @@ scripts/ci/leak-check.sh docs/proofs/2026-09-25-overnight-dry-run.md
 git add docs/proofs/2026-09-25-overnight-dry-run.md
 git commit -m "Record the overnight loop's dry run on Bedrock"
 git push -u origin should/overnight-loop
-gh pr create --title "Should tier: overnight self-improvement loop on the idle GPU box" --body "$(printf 'A frozen judge (18 DEV and 12 held-out coding tasks with hidden checks), a scheduler that changes one harness knob per round and keeps it only above measured noise, gpu.sh tune for the vLLM knobs, and a research log with a morning summary. Dry run on Bedrock recorded.\n\nRule-feedback: none\nShutdown: none needed because the loop runs nothing billable of its own (containers on the laptop, tokens capped by its key budget); overnight.sh stop is its off switch and the GPU box it uses is shutdown.d/10-gpu-box.sh\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
+gh pr create --title "Should tier: overnight self-improvement loop on the idle GPU box" --body "$(printf 'A frozen judge (18 DEV and 12 held-out coding tasks with hidden checks), a scheduler that changes one harness knob per round and keeps it only above measured noise, gpu.sh tune for the vLLM knobs, and a research log with a morning summary. Dry run on Bedrock recorded.\n\nRule-feedback: none\nShutdown: none needed because the only billable thing the loop starts is the GPU box, already covered by shutdown.d/10-gpu-box.sh; overnight.sh stop is its off switch, its containers run on the laptop, and its tokens are capped by the key budget\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
 gh pr checks --watch && gh pr merge --squash --delete-branch
 git checkout main && git pull -q
 ```
 Expected: the leak check prints nothing; `check` and `shutdown-coverage` green; merged. The laptop runs the night from `main`.
 
-At 22:45 CST: the laptop on power, set not to sleep (the script holds `caffeinate -dims` while the loop runs, but closing the lid still sleeps a MacBook without an external display), `aws sso login` fresh for the `cohack` profile (the scheduler needs it for `gpu.sh tune` until 07:00), then:
+Once Task 22 step 20 has stopped the GPU box: the scheduler host on power and set not to sleep for the whole window (the script holds `caffeinate -dims` while the loop runs), a fresh `aws sso login` for the `cohack` profile (the scheduler needs it for `gpu.sh tune` until the loop ends), then:
 
 ```bash
 scripts/gpu.sh start && sleep 600 && scripts/gpu.sh status
@@ -20590,7 +20590,7 @@ scripts/overnight.sh status
 scripts/overnight.sh report
 scripts/gpu.sh status
 d=evals/runs/2026-09-25
-scripts/ci/leak-check.sh "$d/log.md" "$d/best"
+scripts/ci/leak-check.sh "$d/log.md" "$d/log.json" "$d/best"
 ```
 Expected: `not running`, `stop: done` (or `deadline 07:00 CST` if held-out scoring was cut short: then the held-out lines read `not scored` and the report says so); the summary prints; `gpu.sh status` shows `vllm: healthy` with the defaults back (the loop's last act); the leak check prints nothing (the best harness is model-written text: read it before committing).
 
@@ -20598,6 +20598,8 @@ Write `docs/proofs/2026-09-26-overnight-loop.md`:
 
 ```markdown
 # Overnight loop, night of 2026-09-25 (Task 31)
+
+These numbers measure this kit's harness with Qwen3-Coder-30B (AWQ 4-bit) behind Claude Code's gateway mode, which Anthropic does not support, on 30 small tasks written for this kit; they say nothing about Claude models, Claude Code with Claude, or Qwen generally.
 
 - Ran <start> to <end> CST on vLLM, `qwen3-coder` (<model repo>), with its own $5 key; the key's spend: $<x>. Rounds: <n> (<k> kept, <d> dropped, <v> void, <r> rejected). Stop reason: <reason>.
 - Judge: 18 DEV and 12 held-out tasks, checksum `<first 12 hex of the log's judge_sha>`, verified unchanged before every round.
@@ -20637,6 +20639,8 @@ A change is a candidate only if the held-out gain is at least half its DEV gain 
 | `skills` | copied to `plugin/skills/<name>/SKILL.md`, then `make sync-plugin` |
 | `tool_parser`, `max_num_seqs` | `infra/recipes/gpu-box/models.yaml`'s default entry, then `scripts/gpu.sh model <default>` |
 | `sampling` | `scripts/gpu.sh tune evals/runs/2026-09-25/best/knobs.json` after runbook 06's `gpu.sh start` (`models.yaml`'s `extra_args` can't carry JSON through `gpu.sh model`'s character check); add the line to runbook 06 |
+
+Adopted defaults are part of the pre-existing kit and are disclosed with it: the pitch and the idea-lock script (D29) say the kit's agent defaults were tuned by an automated loop before the event, and the same caveat line as the proof file goes at the top of the committed `log.md`.
 
 Each adoption goes in the same branch as step 15, the PR says which rounds it adopts and their DEV and held-out numbers, then:
 
