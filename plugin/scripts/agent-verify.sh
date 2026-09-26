@@ -37,8 +37,9 @@ Checks, in the order they run:
                           in the worktree names that path. Incident: on 2026-09-25 a proof was
                           committed for commands that were never run.
   empty-files             Blocks a changed file that is zero bytes or whitespace-only, except
-                          files named .gitkeep or .keep. Incident: on 2026-09-25 placeholder
-                          images were committed after being created with `touch`.
+                          files named .gitkeep, .keep, __init__.py, py.typed, or .nojekyll.
+                          Incident: on 2026-09-25 placeholder images were committed after being
+                          created with `touch`.
   root-files              Blocks a new file added directly to the repository root that is not on
                           the allow-list (built in, plus one name per line from an optional
                           .agent-verify/root-allow file). Incident: on 2026-09-25, 21 stray
@@ -340,8 +341,8 @@ check_proofs_unbacked() {
 }
 
 # Check empty-files: blocks a changed file that is zero bytes or whitespace-only, except files
-# named .gitkeep or .keep. Incident: on 2026-09-25, 0-byte placeholder images were committed after
-# being made with `touch`.
+# named .gitkeep, .keep, __init__.py, py.typed, or .nojekyll. Incident: on 2026-09-25, 0-byte
+# placeholder images were committed after being made with `touch`.
 check_empty_files() {
   is_skipped "empty-files" && return 0
   local f base
@@ -350,7 +351,7 @@ check_empty_files() {
     [ -f "$worktree_root/$f" ] || continue
     base="${f##*/}"
     case "$base" in
-      .gitkeep|.keep) continue ;;
+      .gitkeep|.keep|__init__.py|py.typed|.nojekyll) continue ;;
     esac
     if [ ! -s "$worktree_root/$f" ]; then
       add_reason "empty-files" "$f: 0 bytes"

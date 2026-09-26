@@ -60,6 +60,10 @@ jobs:
       - name: agent-verify
         env:
           BASE: ${{ env.BASE }}
+          # Team repos own their root layout, so a new root file warns instead of blocking; see
+          # templates/devcontainer/devcontainer.json's XENIA_VERIFY_ARGS for the matching Stop
+          # hook setting in team Claude sessions.
+          VERIFY_EXTRA_ARGS: "--warn root-files"
         run: |
           if [ -x scripts/ci/verify-pr.sh ] && [ -x plugin/scripts/agent-verify.sh ]; then kit=.; else kit=.kit; fi
           "$kit/scripts/ci/verify-pr.sh" "$BASE"

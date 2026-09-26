@@ -53,6 +53,19 @@ verify() { (cd "$REPO" && "$KIT/scripts/ci/verify-pr.sh" "$BASE_SHA"); }
   [[ "$output" != *"::error"* ]]
 }
 
+@test "a new root file fails by default, and warns instead under VERIFY_EXTRA_ARGS=--warn root-files" {
+  echo "notes" > "$REPO/NOTES.md"
+  git -C "$REPO" add -A && git -C "$REPO" commit -qm "root file"
+  run verify
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error file=NOTES.md::NOTES.md: new file in the repository root, not on the allow-list"* ]] || return 1
+
+  run env VERIFY_EXTRA_ARGS="--warn root-files" bash -c "cd '$REPO' && '$KIT/scripts/ci/verify-pr.sh' '$BASE_SHA'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning file=NOTES.md::NOTES.md: new file in the repository root, not on the allow-list"* ]] || return 1
+  [[ "$output" != *"::error"* ]]
+}
+
 @test "the all-zeros SHA is skipped without running the verifier" {
   zeros="$(printf '0%.0s' $(seq 1 40))"
   run bash -c "cd '$REPO' && '$KIT/scripts/ci/verify-pr.sh' '$zeros'"
