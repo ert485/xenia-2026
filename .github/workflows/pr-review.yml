@@ -25,6 +25,7 @@ env:
 jobs:
   check:
     name: review-inputs
+    needs: deep-decide
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -60,9 +61,12 @@ jobs:
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "pr-review mode: $mode"
       - name: make check and the diff (no secrets in this job)
-        # Always runs, even when mode is skip: the deep review (Task 33) can trigger on its own
-        # sampling/risky-path/label rules regardless of the quick review's mode, and both reviews
-        # read this same review-inputs artifact.
+        # Runs whenever the quick review will use it (mode != skip) or the deep review will
+        # (deep-decide already ran, via needs: above, and says run=true): the deep review can
+        # trigger on its own sampling/risky-path/label rules regardless of the quick review's
+        # mode, and both reviews read this same review-inputs artifact. Skipped otherwise, so a
+        # PR neither review will look at doesn't spend a make check run on every push.
+        if: steps.mode.outputs.mode != 'skip' || needs.deep-decide.outputs.run == 'true'
         run: |
           set +e
           make check > check-output.txt 2>&1
@@ -178,6 +182,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       run: ${{ steps.decide.outputs.run }}
     env:
@@ -215,6 +220,23 @@ jobs:
             run="$(printf '%s' "$out" | sed -n 's/^run=\(true\|false\).*/\1/p')"
             echo "run=${run:-false}" >> "$GITHUB_OUTPUT"
           fi
+      - name: fetch the quick review's comment, if any (this job runs no PR code)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          quick="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.body | startswith("<!-- xenia-pr-review -->"))] | last | .body // empty' 2>/dev/null)" || quick=""
+          if [ -n "$quick" ]; then
+            printf '%s\n' "$quick" > quick-review.md
+          else
+            echo "(the quick review has not posted a comment on this PR yet)" > quick-review.md
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: quick-review-comment
+          path: quick-review.md
+          retention-days: 3
 
   deep-review:
     name: deep-review
@@ -240,17 +262,11 @@ jobs:
         with:
           name: review-inputs
           path: .review
-      - name: fetch the quick review's comment, if any (public repo, no token needed)
-        env:
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          comments="$(curl -sf "https://api.github.com/repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100")" || comments='[]'
-          quick="$(printf '%s' "$comments" | jq -r '[.[] | select(.body | startswith("<!-- xenia-pr-review -->"))] | last | .body // empty' 2>/dev/null)" || quick=""
-          if [ -n "$quick" ]; then
-            printf '%s\n' "$quick" > .review/quick-review.md
-          else
-            echo "(the quick review has not posted a comment on this PR yet)" > .review/quick-review.md
-          fi
+      - name: fetch the quick review's comment (deep-decide already read it; no token in this job)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: quick-review-comment
+          path: .review
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: 1.5.7
@@ -297,6 +313,8 @@ jobs:
             echo 'Bot deep review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
             echo
             jq -r '.result' review.json | head -c 60000
+          # the sk-... pattern below redacts gateway keys on the assumption that they're LiteLLM
+          # virtual keys (sk-prefixed); the kit's gateway issues only that kind.
           } | sed -E 's/sk-[A-Za-z0-9_-]{20,}/sk-<redacted>/g; s/[0-9]{12}/<account-id>/g' > deep-review.md
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
