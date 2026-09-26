@@ -62,11 +62,11 @@ SH
   grep -q 'identitystore create-user' "$CALLS"
   grep -q 'identitystore create-group-membership .*--group-id g-fakegroup' "$CALLS"
   grep -q '^gateway-key.sh generate alex 30$' "$CALLS"
-  [[ "$output" == *"sso_role_name = hackathon-dev"* ]]
-  [[ "$output" == *"sso_account_id = 111111111"* ]]
-  [[ "$output" == *"https://d-fakestore.aws""apps.com/start"* ]]
-  [[ "$output" == *"sk-xxxxxxxxxxxxxxxxxxxxxxxx"* ]]
-  [[ "$output" == *"direct message, never in a channel"* ]]
+  [[ "$output" == *"sso_role_name = hackathon-dev"* ]] || return 1
+  [[ "$output" == *"sso_account_id = 111111111"* ]] || return 1
+  [[ "$output" == *"https://d-fakestore.aws""apps.com/start"* ]] || return 1
+  [[ "$output" == *"sk-xxxxxxxxxxxxxxxxxxxxxxxx"* ]] || return 1
+  [[ "$output" == *"direct message, never in a channel"* ]] || return 1
   grep -q "^$A$(printf '\t')alex$(printf '\t')" "$XENIA_LEDGER"
 }
 
@@ -80,7 +80,7 @@ SH
   "$KIT_ROOT/scripts/onboard-teammate.sh" "$A" Alex Hill > /dev/null
   FAKE_USER_EXISTS=1 FAKE_MEMBER=1 run "$KIT_ROOT/scripts/onboard-teammate.sh" "$A" Alex Hill
   [ "$status" -eq 0 ]
-  [[ "$output" == *"already onboarded; use scripts/rotate-key.sh alex"* ]]
+  [[ "$output" == *"already onboarded; use scripts/rotate-key.sh alex"* ]] || return 1
   [ "$(grep -c '^gateway-key.sh generate' "$CALLS")" -eq 1 ]
 }
 
@@ -123,7 +123,24 @@ SH
   grep -q 'identitystore delete-user .*--user-id u-existing' "$CALLS"
   grep -q '^gateway-key.sh revoke alex$' "$CALLS"
   grep -q '^gh api -X DELETE repos/o/team/collaborators/alexh$' "$CALLS"
-  [[ "$output" == *"alexh is a code owner"* ]]
-  [[ "$output" == *"approved by another owner"* ]]
+  [[ "$output" == *"alexh is a code owner"* ]] || return 1
+  [[ "$output" == *"approved by another owner"* ]] || return 1
   [ ! -s "$XENIA_LEDGER" ]
+}
+
+@test "offboard warns when the CODEOWNERS fetch fails" {
+  printf '%s\talex\t2026-09-26\n' "$A" > "$XENIA_LEDGER"
+  cat > "$TMP/bin/gh" <<'SH'
+#!/usr/bin/env bash
+printf 'gh %s\n' "$*" >> "$CALLS"
+case "$*" in
+  *"contents/CODEOWNERS"*) exit 1 ;;
+  *"secret set"*) cat > /dev/null ;;
+esac
+exit 0
+SH
+  chmod +x "$TMP/bin/gh"
+  FAKE_USER_EXISTS=1 FAKE_MEMBER=1 TEAM_REPO=o/team run "$KIT_ROOT/scripts/offboard-teammate.sh" "$A" --github alexh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: could not read CODEOWNERS for o/team; check by hand whether alexh is a code owner"* ]]
 }

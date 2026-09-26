@@ -28,9 +28,8 @@ idc() { aws identitystore "$@" --identity-store-id "$ids" --profile personal-adm
 
 user_id="$(idc list-users --filters "AttributePath=UserName,AttributeValue=$email" --query 'Users[0].UserId' --output text)"
 if [[ -n "$user_id" && "$user_id" != "None" ]]; then
-  # Check if user is in the group, ignore errors if not found
-  membership=$(idc get-group-membership-id --group-id "$group" --member-id "UserId=$user_id" --query MembershipId --output text 2>/dev/null) || :
-  if [[ -n "$membership" ]]; then
+  # ok-to-hide: a user who is not in the group makes this lookup fail; delete-user below still surfaces real errors
+  if membership="$(idc get-group-membership-id --group-id "$group" --member-id "UserId=$user_id" --query MembershipId --output text 2>/dev/null)"; then
     idc delete-group-membership --membership-id "$membership"
     log "removed from the hackathon group"
   fi
@@ -58,10 +57,12 @@ if [[ -n "$handle" ]]; then
     gh api -X DELETE "repos/$TEAM_REPO/invitations/$inv"
   done
   log "removed $handle's access to $TEAM_REPO (and any pending invitation)"
-  # Get CODEOWNERS file, ignore errors if it doesn't exist or can't be accessed
-  owners="$(gh api "repos/$TEAM_REPO/contents/CODEOWNERS" --jq .content 2>/dev/null | base64 --decode 2>/dev/null || :) || :"
+  # ok-to-hide: a missing CODEOWNERS file is normal; a failed fetch is reported below
+  owners="$(gh api "repos/$TEAM_REPO/contents/CODEOWNERS" --jq .content 2>/dev/null | base64 --decode 2>/dev/null || true)"
   if printf '%s\n' "$owners" | grep -qE "(^|[[:space:]])@$handle([[:space:]]|$)"; then
     echo "$handle is a code owner. The CODEOWNERS edit goes through a PR approved by another owner:"
     echo "  perl -pi -e 's/\\s\\@$handle(?=\\s|\$)//g' CODEOWNERS && git switch -c offboard-$handle && git commit -am 'Remove $handle from CODEOWNERS'"
+  elif [[ -z "$owners" ]]; then
+    log "warning: could not read CODEOWNERS for $TEAM_REPO; check by hand whether $handle is a code owner"
   fi
 fi
