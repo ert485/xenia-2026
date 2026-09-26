@@ -270,6 +270,36 @@ assert_allow() {
   assert_deny proofs
 }
 
+# Fix round 2: the reviewer found that a wrapper's own option VALUE (a sudo user, an env var name)
+# was mistaken for the real command, because the wrapper-stripping loop only skipped tokens starting
+# with "-", never the separate value that follows an option like `sudo -u`. That let every rule below
+# be skipped entirely for a wrapped command.
+@test "fix round 2: sudo/env/nice/timeout option values are not mistaken for the real command" {
+  for cmd in \
+    "sudo -u root git push --force" \
+    "sudo -u root -- git push --force" \
+    "env -u FOO git push --force" \
+    "env -C /tmp git push -f" \
+    "nice -n 5 git push --force" \
+    "timeout 30 git push --force"
+  do
+    run_hook_with "$(bash_payload "$cmd")"
+    assert_deny force-push
+  done
+  run_hook_with "$(bash_payload "sudo -u root rm -rf /workspace")"
+  assert_deny delete-workspace
+}
+
+@test "fix round 2: a wrapped command that is actually fine is still allowed" {
+  for cmd in \
+    "sudo -u root git push -u origin agent/x" \
+    "timeout 30 git status"
+  do
+    run_hook_with "$(bash_payload "$cmd")"
+    assert_allow
+  done
+}
+
 @test "hooks.json: PreToolUse is wired to deny-ruinous.sh and SessionStart is unchanged" {
   jq -e '.hooks.PreToolUse[0].matcher == "Bash|Write|Edit|MultiEdit|NotebookEdit"' "$KIT/plugin/hooks/hooks.json"
   jq -e '.hooks.PreToolUse[0].hooks[0].command | contains("deny-ruinous.sh")' "$KIT/plugin/hooks/hooks.json"

@@ -15,9 +15,12 @@ ARG ACTIONLINT_VERSION=1.7.11
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
 
 # Upstream tool list plus Python, certificates, and the kit's test tools (`make check` needs bats and shellcheck here too).
+# locales/en_US.UTF-8: fix-round-2 -- devcontainer exec and VS Code on a Mac forward LC_ALL/LANG=en_US.UTF-8,
+# which the base image lacks, so every bash prints a setlocale warning that breaks exact-match bats tests.
 RUN apt-get update && apt-get install -y --no-install-recommends \
   less git procps sudo fzf zsh man-db unzip gnupg2 gh iptables ipset iproute2 dnsutils aggregate jq nano vim \
-  python3 python3-pip python3-venv pipx ca-certificates curl wget bats shellcheck \
+  python3 python3-pip python3-venv pipx ca-certificates curl wget bats shellcheck locales \
+  && sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && locale-gen \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Docker CLI and the compose and buildx plugins (client only; the daemon is the host's or Codespaces').
@@ -83,6 +86,12 @@ RUN python3 -m venv /opt/xenia/venv \
 # The kit plugin, seeded at user scope (spec section 11). Kept outside ~/.claude, which is a volume.
 USER root
 COPY --chown=node:node plugin/ /opt/xenia/plugins/xenia-kit/
+# fix-round-2: CLAUDE_CODE_PLUGIN_SEED_DIR alone left the plugin invisible to `claude plugin list`
+# ("No plugins installed") -- a plugin has to come from a marketplace, so postCreate.sh can
+# `claude plugin marketplace add` this directory and `claude plugin install xenia-kit@xenia`.
+RUN mkdir -p /opt/xenia/plugins/.claude-plugin \
+  && printf '%s' '{"name":"xenia","owner":{"name":"xenia kit"},"plugins":[{"name":"xenia-kit","source":"./xenia-kit","description":"The Co.Hack 2026 kit plugin: team rules, skills, the verifier'\''s Stop hook and deny hooks"}]}' > /opt/xenia/plugins/.claude-plugin/marketplace.json \
+  && chown -R node:node /opt/xenia/plugins/.claude-plugin
 ENV CLAUDE_CODE_PLUGIN_SEED_DIR=/opt/xenia/plugins
 
 # /etc/profile resets PATH for a login shell (`bash -lc`), dropping the ENV PATH above; this restores the venv ahead of it.

@@ -34,10 +34,13 @@ container, or rebuild the image (the `devcontainer-image` workflow publishes one
 `main` that touches `plugin/`). Rule text changes need neither: the hook reads `PRINCIPLES.md` from
 the open repo at each session start.
 
-If the seed directory is not picked up (`claude plugin list` shows no `xenia-kit`), add
-`claude plugin install /opt/xenia/plugins/xenia-kit` to `.devcontainer/postCreate.sh`; if that
-command refuses a local path, add `alias claude='claude --plugin-dir /opt/xenia/plugins/xenia-kit'`
-to the shell block `postCreate.sh` writes instead.
+The Dockerfile also writes `/opt/xenia/plugins/.claude-plugin/marketplace.json`, a one-plugin
+marketplace pointing at `./xenia-kit`, because a seeded directory alone is not enough: Claude Code
+installs plugins from a marketplace, not from `CLAUDE_CODE_PLUGIN_SEED_DIR` by itself.
+`postCreate.sh` checks `claude plugin list` for `xenia-kit` and, if it's missing, runs
+`claude plugin marketplace add /opt/xenia/plugins` followed by `claude plugin install
+xenia-kit@xenia`. If either step fails, it prints one `postCreate: WARNING` line and moves on
+(never fails the container build); run `/doctor` to see what's wrong.
 
 ## Stop hook
 

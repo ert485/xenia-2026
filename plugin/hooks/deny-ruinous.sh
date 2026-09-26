@@ -10,6 +10,10 @@
 # never by matching a raw substring: fix-round-1 found that substring matching both missed real
 # bypasses (`git  push --force` with two spaces, `git "push" --force`, `git -C dir push --force`)
 # and denied things that only *mention* a pattern in quoted text (a commit message, an echo string).
+# fix-round-2: the tokenizer alone isn't enough -- a wrapper (sudo/env/nice/timeout/...) that takes
+# an option's value as its own token was letting the value be mistaken for the real command, so every
+# rule below it was skipped. This hook is still a guardrail, not a sandbox: `bash -c` and `eval`
+# (which hide a command from tokenizing entirely) are out of scope, same as the plan calls it.
 set -uo pipefail
 # Defence in depth: nothing here should ever glob-expand against this process's real cwd.
 set -f
@@ -314,8 +318,14 @@ check_git_subcommand() {
   return 0
 }
 
-# Wrappers stripped before resolving the real command: leading VAR=value assignments, sudo (and its
-# flags), command, env (and its own flags/assignments), exec, nohup, time.
+# Wrappers stripped before resolving the real command: leading VAR=value assignments, sudo, command,
+# env, exec, nohup, time, nice, ionice, timeout (and each one's own flags/assignments).
+#
+# fix-round-2: a wrapper option that takes its value as a SEPARATE token (`sudo -u root ...`,
+# `env -u FOO ...`) was only skipped by "matches -*", which skips the option itself but not its
+# value -- so the value (a username, an env var name) was mistaken for the real command and every
+# rule below was skipped for it. Each wrapper below now knows which of its own options take a
+# separate value and skips that token too, and sudo/env additionally stop at a literal `--`.
 resolve_simple_command() {
   # Reads the global SIMPLE array; sets REAL_BASE and the global ARGS array. REAL_BASE is empty if
   # nothing but assignments/wrappers were found (nothing to check).
@@ -329,18 +339,99 @@ resolve_simple_command() {
     fi
     base="${t##*/}"
     case "$base" in
-      sudo|command|exec|nohup|time)
+      sudo)
+        # Options that take a separate value: -u user, -g group, -h host, -p prompt, -C num,
+        # -D dir, -r role, -t type, -U user, -T timeout. A `--user=`-style long form carries its
+        # value in the same token, so the generic "-*" skip already handles it. `--` ends option
+        # parsing (whatever follows is the real command, even if it looks like a flag).
+        i=$((i + 1))
+        while [ "$i" -lt "$n" ]; do
+          t="${SIMPLE[$i]}"
+          [[ "$t" == "--" ]] && { i=$((i + 1)); break; }
+          case "$t" in
+            -*)
+              i=$((i + 1))
+              case "$t" in
+                -u|-g|-h|-p|-C|-D|-r|-t|-U|-T) i=$((i + 1)) ;;
+              esac
+              continue
+              ;;
+          esac
+          break
+        done
+        continue
+        ;;
+      command|exec)
+        # exec -a NAME sets argv[0]; NAME is exec's own value, not the real command.
+        i=$((i + 1))
+        while [ "$i" -lt "$n" ]; do
+          t="${SIMPLE[$i]}"
+          case "$t" in
+            -a) i=$((i + 2)); continue ;;
+            -*) i=$((i + 1)); continue ;;
+          esac
+          break
+        done
+        continue
+        ;;
+      nohup|time)
         i=$((i + 1))
         while [ "$i" -lt "$n" ] && [[ "${SIMPLE[$i]}" == -* ]]; do i=$((i + 1)); done
         continue
         ;;
-      env)
+      nice)
+        # -n N: the niceness increment.
         i=$((i + 1))
         while [ "$i" -lt "$n" ]; do
-          case "${SIMPLE[$i]}" in
+          t="${SIMPLE[$i]}"
+          case "$t" in
+            -n) i=$((i + 2)); continue ;;
             -*) i=$((i + 1)); continue ;;
           esac
-          if [[ "${SIMPLE[$i]}" =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]]; then
+          break
+        done
+        continue
+        ;;
+      ionice)
+        # -c N (class), -n N (level), -p PID: each takes a separate value.
+        i=$((i + 1))
+        while [ "$i" -lt "$n" ]; do
+          t="${SIMPLE[$i]}"
+          case "$t" in
+            -c|-n|-p) i=$((i + 2)); continue ;;
+            -*) i=$((i + 1)); continue ;;
+          esac
+          break
+        done
+        continue
+        ;;
+      timeout)
+        # -k DURATION, -s SIGNAL take a separate value; then the DURATION positional (before the
+        # real command) is itself skipped, never treated as the command.
+        i=$((i + 1))
+        while [ "$i" -lt "$n" ]; do
+          t="${SIMPLE[$i]}"
+          case "$t" in
+            -k|-s) i=$((i + 2)); continue ;;
+            -*) i=$((i + 1)); continue ;;
+          esac
+          break
+        done
+        [ "$i" -lt "$n" ] && i=$((i + 1))
+        continue
+        ;;
+      env)
+        # -u NAME (unset), -C DIR (chdir), -S STRING (split) take a separate value; `--` ends
+        # option parsing the same as for sudo.
+        i=$((i + 1))
+        while [ "$i" -lt "$n" ]; do
+          t="${SIMPLE[$i]}"
+          [[ "$t" == "--" ]] && { i=$((i + 1)); break; }
+          case "$t" in
+            -u|-C|-S) i=$((i + 2)); continue ;;
+            -*) i=$((i + 1)); continue ;;
+          esac
+          if [[ "$t" =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]]; then
             i=$((i + 1)); continue
           fi
           break
