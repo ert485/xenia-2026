@@ -1,16 +1,40 @@
-# xenia-2026: Co.Hack 2026 prep kit
+# Co.Hack 2026 prep kit
 
-Project-agnostic hackathon kit: an isolated AWS member account, `26.cohack.tetl.ca` with a wildcard
-certificate, GitHub OIDC deploys, per-PR preview environments, a team GPU box serving an open-weight
-coding model to Claude Code and OpenCode, cost alerts with a one-command shutdown, and a defaults-first
-team kit for forming a team on the day.
+A kit for a hackathon team that doesn't exist yet: hosting with a real URL, a domain, CI with two gates, an AI coding setup in a dev container, previews for every pull request, one command to stop everything that costs money, and a one-page way of working with a default for every day-of decision. Nothing in it assumes what the team will build.
 
-Start with the design spec: `docs/superpowers/specs/2026-09-23-cohack-prep-kit-design.md`.
+Read it as a website: **https://26.cohack.tetl.ca**
 
-## Dev container
+## Saturday morning, after idea lock (Erik)
 
-Open the repo in the dev container (`.devcontainer/`) for Claude Code and OpenCode pre-wired to
-the team gateway, plus a default-deny egress firewall with an explicit host allow-list. The
-firewall goes up in `postStartCommand`, every time the container starts. Teammate: if that step
-fails, stop and run `/doctor` before doing anything else -- do not disable or work around the
-firewall. Agent: if the firewall step failed, stop and run `/doctor` before continuing any task.
+    scripts/onboard-repo.sh <owner>/<repo> --owners @a,@b
+    scripts/onboard-teammate.sh <email> <first> <last>
+
+Then each teammate opens a Codespace on the team repo, pastes their key, and runs `claude`. The full order is in `runbook/06-saturday.md`.
+
+## What's here
+
+| Path | What |
+|---|---|
+| `team-kit/` | the team pages: rules, charter, timeline, onboarding, demo and pitch |
+| `runbook/` | Erik's steps, Wednesday to Sunday |
+| `infra/` | Terraform: the org and platform stacks, the Docker box with the gateway, the GPU box, the static site |
+| `templates/` | what `onboard-repo.sh` copies into a team repo: workflows, dev container, principles, PR and issue templates |
+| `plugin/` | the Claude Code plugin: the rules at session start and seven skills |
+| `scripts/` | everything humans run; `scripts/status.sh` shows what's running |
+| `shutdown.d/`, `SHUTDOWN.md` | the off switches and their rendered list |
+| `docs/superpowers/specs/`, `docs/superpowers/plans/` | the design and the build plan |
+| `docs/proofs/` | what was proven before the event, and how |
+
+## Other teams are welcome to use this
+
+Everything is MIT licensed and public. Pin the plugin and the templates by commit rather than following `main`, because the kit changes during the event. Your AWS account IDs and keys go in your own gitignored `kit.local.env`, never in the repo.
+
+## Honest limits
+
+- `scripts/shutdown.sh` stops only what has an entry in `shutdown.d/`. Check your billing console too: your AWS bill is yours.
+- Budget alerts lag several hours; `scripts/status.sh` shows what runs right now.
+- The shared model is an open 30B coder: fine for scoped tasks, weaker on long multi-step runs.
+
+## Friction
+
+In Claude Code, `/pain <one line>` files a `friction` issue after you confirm the wording. The top item gets fixed once, in shared tooling.

@@ -51,3 +51,11 @@ that the box assumes at boot to read `/xenia/gpu/*`. `scripts/gpu.sh` and the sh
 
 About $1.86 an hour while running, plus about $16 a month for the 200 GB volume while it exists.
 Stopped overnight Thursday and Friday; started Saturday 08:00 (runbook 06).
+
+## Related
+
+- [01: GPU quota](01-quota.md) for the quota check in either account.
+- [03: Thursday bootstrap](03-bootstrap.md), step 7, for the first apply.
+- [05: Friday dry run](05-friday-dry-run.md) for the failover and load-test proofs.
+- [06: Saturday](06-saturday.md): `scripts/gpu.sh start` at 08:00.
+- The off switch is `shutdown.d/10-gpu-box.sh`; its row is in `SHUTDOWN.md`.
