@@ -30,3 +30,40 @@ jobs:
           GITLEAKS_ENABLE_COMMENTS: "false"
       - name: make check
         run: make check
+
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: fetch the kit's verifier (team repos don't vendor it)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ert485/xenia-2026
+          ref: ${{ vars.KIT_REF || 'main' }}
+          path: .kit
+          persist-credentials: false
+      - name: resolve the base commit
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then base="$PR_BASE_SHA"; else base="$PUSH_BASE_SHA"; fi
+          echo "BASE=$base" >> "$GITHUB_ENV"
+      - name: agent-verify
+        env:
+          BASE: ${{ env.BASE }}
+          # Team repos own their root layout, so a new root file warns instead of blocking; see
+          # templates/devcontainer/devcontainer.json's XENIA_VERIFY_ARGS for the matching Stop
+          # hook setting in team Claude sessions.
+          VERIFY_EXTRA_ARGS: "--warn root-files"
+        run: |
+          if [ -x scripts/ci/verify-pr.sh ] && [ -x plugin/scripts/agent-verify.sh ]; then kit=.; else kit=.kit; fi
+          "$kit/scripts/ci/verify-pr.sh" "$BASE"

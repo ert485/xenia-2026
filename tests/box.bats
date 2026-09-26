@@ -25,7 +25,7 @@ EOF
   [ "$status" -eq 0 ]
   grep -q -- '--document-name xenia-gateway' "$AWS_CALLS"
   grep -qF '{"Action":["status"]}' "$AWS_CALLS"
-  [[ "$output" == *"networks: backend edge"* ]]
+  [[ "$output" == *"networks: backend edge"* ]] || return 1
   [[ "$output" == *"<account-id>"* ]]
 }
 
@@ -38,6 +38,6 @@ EOF
 @test "box.sh rejects a parameter that is not Key=Value" {
   run scripts/box.sh xenia-gateway status
   [ "$status" -eq 1 ]
-  [[ "$output" == *"not Key=Value"* ]]
+  [[ "$output" == *"not Key=Value"* ]] || return 1
   ! grep -q 'send-command' "$AWS_CALLS"
 }

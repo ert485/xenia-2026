@@ -100,7 +100,7 @@ EOF
 @test "backup.sh skips a container that vanishes between ps and inspect, without aborting the run" {
   PS_EXTRA="vanished docker.io/library/postgres:16" run bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"backup skipped: vanished (vanished before inspect)"* ]]
+  [[ "$output" == *"backup skipped: vanished (vanished before inspect)"* ]] || return 1
   # every other container in the base fixture is still backed up despite the vanished one
   grep -qx 'pg-plain' "$DUMP_CALLS"
   grep -qx 'labelled' "$DUMP_CALLS"
@@ -111,7 +111,7 @@ EOF
 @test "backup.sh: one container's exec fails, the others still get dumped, exit status 1" {
   PS_EXTRA="pg-fail docker.io/library/postgres:16" run bash "$SCRIPT"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"backup FAILED: pg-fail"* ]]
+  [[ "$output" == *"backup FAILED: pg-fail"* ]] || return 1
   grep -qx 'pg-plain' "$DUMP_CALLS"
   grep -qx 'pg-caps' "$DUMP_CALLS"
   grep -qx 'labelled' "$DUMP_CALLS"

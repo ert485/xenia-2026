@@ -1,0 +1,40 @@
+# shutdown-coverage: the second of the two blocking gates (P-two-gates, P-off-switch).
+# A billable diff needs a shutdown.d change or a "Shutdown: none needed because <reason>" line.
+name: shutdown-coverage
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+permissions: {}
+concurrency:
+  group: shutdown-coverage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  shutdown-coverage:
+    name: shutdown-coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: fetch the kit's scripts (team repos don't vendor them)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ert485/xenia-2026
+          ref: ${{ vars.KIT_REF || 'main' }}
+          path: .kit
+          persist-credentials: false
+      - name: install shellcheck
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
+      - name: shutdown coverage
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.txt"
+          if [ -x scripts/ci/shutdown-coverage.sh ] && [ -x scripts/shutdown.sh ]; then kit=.; else kit=.kit; fi
+          "$kit/scripts/ci/shutdown-coverage.sh" "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/body.txt"

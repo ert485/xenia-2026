@@ -12,3 +12,17 @@ resource "aws_ssm_document" "deploy" {
   document_format = "YAML"
   content         = file("${path.module}/ssm/deploy.yaml")
 }
+
+resource "aws_ssm_document" "preview_up" {
+  name            = "xenia-preview-up"
+  document_type   = "Command"
+  document_format = "YAML"
+  content         = file("${path.module}/ssm/preview-up.yaml")
+}
+
+resource "aws_ssm_document" "preview_down" {
+  name            = "xenia-preview-down"
+  document_type   = "Command"
+  document_format = "YAML"
+  content         = file("${path.module}/ssm/preview-down.yaml")
+}

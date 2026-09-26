@@ -45,8 +45,8 @@ EOF
 @test "capacity available: creates and cancels a reservation per type/zone, exits 0" {
   AVAILABLE=1 run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"g6e.xlarge us-east-1a: AVAILABLE (reservation cr-fake123, active)"* ]]
-  [[ "$output" == *"g6e.2xlarge us-east-1a: AVAILABLE (reservation cr-fake123, active)"* ]]
+  [[ "$output" == *"g6e.xlarge us-east-1a: AVAILABLE (reservation cr-fake123, active)"* ]] || return 1
+  [[ "$output" == *"g6e.2xlarge us-east-1a: AVAILABLE (reservation cr-fake123, active)"* ]] || return 1
   grep -q 'cancel-capacity-reservation --capacity-reservation-id cr-fake123' "$AWS_CALLS"
   grep -q -- '--region us-east-1 ec2' "$AWS_CALLS"
   grep -q -- '--region ca-central-1 logs put-log-events' "$AWS_CALLS"
@@ -76,8 +76,8 @@ EOF
 @test "capacity none: no capacity logs NONE for each type/zone, exits 0" {
   AVAILABLE=0 run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"g6e.xlarge us-east-1a: NONE"* ]]
-  [[ "$output" == *"g6e.2xlarge us-east-1a: NONE"* ]]
+  [[ "$output" == *"g6e.xlarge us-east-1a: NONE"* ]] || return 1
+  [[ "$output" == *"g6e.2xlarge us-east-1a: NONE"* ]] || return 1
   ! grep -q 'cancel-capacity-reservation' "$AWS_CALLS"
 }
 
@@ -90,13 +90,13 @@ EOF
 @test "sweep at start: a stale reservation is cancelled before probing" {
   SWEEP_IDS=cr-stale1 AVAILABLE=1 run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"swept stale reservation cr-stale1"* ]]
+  [[ "$output" == *"swept stale reservation cr-stale1"* ]] || return 1
   grep -q 'cancel-capacity-reservation --capacity-reservation-id cr-stale1' "$AWS_CALLS"
 }
 
 @test "sweep cancel failure: logs ALERT and exits non-zero before probing anything" {
   SWEEP_IDS=cr-stale1 CANCEL_FAIL=1 run "$SCRIPT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"ALERT: failed to cancel stale reservation cr-stale1"* ]]
+  [[ "$output" == *"ALERT: failed to cancel stale reservation cr-stale1"* ]] || return 1
   ! grep -q 'describe-instance-type-offerings' "$AWS_CALLS"
 }

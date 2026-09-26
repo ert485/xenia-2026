@@ -16,9 +16,9 @@ ctx() { jq -r .hookSpecificOutput.additionalContext <<< "$output"; }
   run bash -c 'cd "$REPO" && bash "$HOOK"'
   [ "$status" -eq 0 ]
   [ "$(jq -r .hookSpecificOutput.hookEventName <<< "$output")" = "SessionStart" ]
-  [[ "$(ctx)" == *"REPO-COPY-MARKER"* ]]
-  [[ "$(ctx)" != *"kit default copy"* ]]
-  [[ "$(ctx)" == "Agent: these are the team's rules"* ]]
+  [[ "$(ctx)" == *"REPO-COPY-MARKER"* ]] || return 1
+  [[ "$(ctx)" != *"kit default copy"* ]] || return 1
+  [[ "$(ctx)" == "Agent: these are the team's rules"* ]] || return 1
   [[ "$(ctx)" == *"/pain (log friction)"* ]]
 }
 
@@ -36,8 +36,8 @@ ctx() { jq -r .hookSpecificOutput.additionalContext <<< "$output"; }
   printf 'PLANTED-TEXT\n' > "$REPO/PRINCIPLES.md"
   run bash -c 'cd "$REPO" && bash "$HOOK"'
   [ "$status" -eq 0 ]
-  [[ "$(ctx)" != *"PLANTED-TEXT"* ]]
-  [[ "$(ctx)" == *"P-ours"* ]]
+  [[ "$(ctx)" != *"PLANTED-TEXT"* ]] || return 1
+  [[ "$(ctx)" == *"P-ours"* ]] || return 1
   [[ "$(ctx)" == *"(kit default copy: this repo is not on the kit's allowed list, see plugin/allowed-repos.txt)"* ]]
 }
 
@@ -54,7 +54,7 @@ ctx() { jq -r .hookSpecificOutput.additionalContext <<< "$output"; }
   head -c 10240 /dev/zero | tr '\0' 'a' > "$REPO/PRINCIPLES.md"
   run bash -c 'cd "$REPO" && bash "$HOOK"'
   [ "$status" -eq 0 ]
-  [[ "$(ctx)" == *"[truncated at 4 KB; read PRINCIPLES.md in full]"* ]]
+  [[ "$(ctx)" == *"[truncated at 4 KB; read PRINCIPLES.md in full]"* ]] || return 1
   [ "$(ctx | tr -cd 'a' | wc -c | tr -d ' ')" -le 4200 ]
 }
 
@@ -62,7 +62,7 @@ ctx() { jq -r .hookSpecificOutput.additionalContext <<< "$output"; }
   mkdir -p "$BATS_TEST_TMPDIR/plain"
   run bash -c 'cd "$BATS_TEST_TMPDIR/plain" && GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" bash "$HOOK"'
   [ "$status" -eq 0 ]
-  [[ "$(ctx)" == *"P-public"* ]]
+  [[ "$(ctx)" == *"P-public"* ]] || return 1
   [[ "$(ctx)" == *"kit default copy"* ]]
 }
 

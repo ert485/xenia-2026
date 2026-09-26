@@ -52,7 +52,10 @@ session end but leaves a `systemMessage` saying so, plus the reasons in `.agent/
 file is what to read to see why it fired. Set `XENIA_VERIFY_ARGS` (for example
 `--skip make-check`) in the environment to tune which checks run, without editing the plugin. It
 never blocks on its own failure: if the verifier itself can't run, the hook fails open with a
-`systemMessage` and CI's copy of the same checks (Task 14) is the backstop.
+`systemMessage` and CI's copy of the same checks (Task 14) is the backstop. Team repos treat a new
+root file as a warning rather than a block, since teams own their own root layout: this comes from
+`XENIA_VERIFY_ARGS: "--warn root-files"` in `templates/devcontainer/devcontainer.json`'s
+`containerEnv` (and its byte-identical copy at `.devcontainer/devcontainer.json`).
 
 ## Deny hooks
 

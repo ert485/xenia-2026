@@ -74,6 +74,6 @@ EOF
   NET_GATEWAY="172.20.0.1" ROUTE_LINE="default via 172.30.0.1 dev eth1" \
     run bash -c 'source "$LIB"; gateway_route_check gateway-caddy-1 backend'
   [ "$status" -eq 3 ]
-  [[ "$output" == *"172.30.0.1"* ]]
+  [[ "$output" == *"172.30.0.1"* ]] || return 1
   [[ "$output" == *"172.20.0.1"* ]]
 }

@@ -22,11 +22,11 @@ setup() {
 @test "dirty fixture reports all six classes" {
   run scripts/ci/leak-check.sh --allow-emails "$ALLOW" "$DIRTY"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"dirty.md:1: 12-digit number"* ]]
-  [[ "$output" == *"dirty.md:2: awsapps.com"* ]]
-  [[ "$output" == *"dirty.md:3: hosted-zone-shaped"* ]]
-  [[ "$output" == *"dirty.md:4: IPv4"* ]]
-  [[ "$output" == *"dirty.md:5: phone"* ]]
+  [[ "$output" == *"dirty.md:1: 12-digit number"* ]] || return 1
+  [[ "$output" == *"dirty.md:2: awsapps.com"* ]] || return 1
+  [[ "$output" == *"dirty.md:3: hosted-zone-shaped"* ]] || return 1
+  [[ "$output" == *"dirty.md:4: IPv4"* ]] || return 1
+  [[ "$output" == *"dirty.md:5: phone"* ]] || return 1
   [[ "$output" == *"dirty.md:6: email not on the allow-list: someone@"* ]]
 }
 

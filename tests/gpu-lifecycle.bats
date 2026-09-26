@@ -36,7 +36,7 @@ EOF
   grep -q 'ec2 start-instances --instance-ids i-0123456789abcdef0' "$AWS_CALLS"
   grep -q 'ec2 wait instance-running --instance-ids i-0123456789abcdef0' "$AWS_CALLS"
   grep -q 'ssm send-command --instance-ids i-0123456789abcdef0' "$AWS_CALLS"
-  [[ "$output" == *"vLLM healthy"* ]]
+  [[ "$output" == *"vLLM healthy"* ]] || return 1
   grep -q 'document-name xenia-gateway' "$AWS_CALLS"
   grep -q 'ssm send-command --instance-ids i-0fedcba9876543210 --document-name xenia-gateway' "$AWS_CALLS"
   [[ "$output" == *"Success"* || "$output" == *"gateway updated"* ]]
@@ -45,7 +45,7 @@ EOF
 @test "gpu.sh start: health check times out, still updates the gateway (not a hard failure)" {
   HEALTH_STATUS=Failed GPU_PROFILE=cohack run scripts/gpu.sh start
   [ "$status" -eq 0 ]
-  [[ "$output" == *"still not healthy after 20 minutes"* ]]
+  [[ "$output" == *"still not healthy after 20 minutes"* ]] || return 1
   grep -q 'ssm send-command --instance-ids i-0fedcba9876543210 --document-name xenia-gateway' "$AWS_CALLS"
 }
 

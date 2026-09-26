@@ -1,0 +1,44 @@
+# preview-down: removes this PR's preview when the PR closes (merged or not).
+name: preview-down
+on:
+  pull_request:
+    types: [closed]
+permissions: {}
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  preview-down:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_PREVIEW_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'ca-central-1' }}
+          mask-aws-account-id: true
+      - name: remove the preview from the Docker box
+        run: |
+          set -euo pipefail
+          iid="$(aws ssm describe-instance-information \
+            --filters "Key=tag:xenia-role,Values=docker-box" \
+            --query 'InstanceInformationList[0].InstanceId' --output text)"
+          if [ -z "$iid" ] || [ "$iid" = "None" ]; then echo "Docker box offline; nothing to remove"; exit 0; fi
+          cid="$(aws ssm send-command --document-name xenia-preview-down --instance-ids "$iid" \
+            --parameters "$(jq -nc --arg pr "$PR" '{Pr:[$pr]}')" --comment "preview down PR $PR" \
+            --query Command.CommandId --output text)"
+          st=Pending
+          for _ in $(seq 1 60); do
+            sleep 5
+            st="$(aws ssm get-command-invocation --command-id "$cid" --instance-id "$iid" --query Status --output text 2>/dev/null || echo Pending)"
+            case "$st" in Pending|InProgress|Delayed) continue ;; *) break ;; esac
+          done
+          aws ssm get-command-invocation --command-id "$cid" --instance-id "$iid" \
+            --query '[StandardOutputContent,StandardErrorContent]' --output text | sed -E 's/[0-9]{12}/<account-id>/g'
+          test "$st" = Success

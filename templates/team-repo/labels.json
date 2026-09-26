@@ -1,0 +1,7 @@
+[
+  { "name": "friction", "color": "d93f0b", "description": "Something hurt; the pain-review bot ranks these" },
+  { "name": "rule-feedback", "color": "5319e7", "description": "A knowing exception to a team rule (feedback on the rule, never on a person)" },
+  { "name": "next-fix", "color": "0e8a16", "description": "The top item from pain-review: fix it once, in shared tooling" },
+  { "name": "review", "color": "1d76db", "description": "Ask the bot for an advisory review of this PR" },
+  { "name": "breaking-ok", "color": "b60205", "description": "This PR changes a contract on purpose" }
+]

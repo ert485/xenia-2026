@@ -18,10 +18,14 @@ fmt:
 	@if [ -d infra ]; then terraform fmt -check -recursive infra; fi
 
 validate:
+	@if [ -z "$$TF_PLUGIN_CACHE_DIR" ]; then mkdir -p "$(CURDIR)/.terraform-plugin-cache"; fi
 	@for s in $(STACKS); do \
 	  [ -f infra/$$s/versions.tf ] || continue; \
 	  echo "validate infra/$$s"; \
-	  (cd infra/$$s && export TF_DATA_DIR=.terraform-validate && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
+	  (cd infra/$$s && export TF_DATA_DIR=.terraform-validate && \
+	    export TF_PLUGIN_CACHE_DIR="$${TF_PLUGIN_CACHE_DIR:-$(CURDIR)/.terraform-plugin-cache}" && \
+	    export TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE=true && \
+	    terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
 	done
 
 lint:
@@ -48,7 +52,7 @@ sync-workflows: ## the kit runs its own templates; check.yml is kit-specific and
 	@for f in shutdown-coverage render-shutdown-md pr-review; do [ -f templates/workflows/$$f.yml ] && cp templates/workflows/$$f.yml .github/workflows/$$f.yml; done; true
 
 shutdown-md:
-	scripts/render-shutdown-md.sh > SHUTDOWN.md
+	scripts/render-shutdown-md.sh shutdown.d > SHUTDOWN.md.tmp && mv SHUTDOWN.md.tmp SHUTDOWN.md
 
 shutdown-md-check:
-	@if [ -x scripts/render-shutdown-md.sh ]; then scripts/render-shutdown-md.sh | diff -u SHUTDOWN.md - || { echo "SHUTDOWN.md is stale: run make shutdown-md"; exit 1; }; fi
+	@if [ -x scripts/render-shutdown-md.sh ]; then scripts/render-shutdown-md.sh shutdown.d | diff -u SHUTDOWN.md - || { echo "SHUTDOWN.md is stale: run make shutdown-md"; exit 1; }; fi

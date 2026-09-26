@@ -26,7 +26,7 @@ EOF
   run plugin/scripts/notify.sh "deploy is green"
   [ "$status" -eq 0 ]
   body="$(grep '^body ' "$CURL_CALLS" | cut -c6-)"
-  [[ "$(jq -r .content <<< "$body")" == "[agent · "*" · "*"] deploy is green" ]]
+  [[ "$(jq -r .content <<< "$body")" == "[agent · "*" · "*"] deploy is green" ]] || return 1
   [ "$(jq -c .allowed_mentions <<< "$body")" = '{"parse":[]}' ]
   grep -qF 'url https://discord.test/api/webhooks/1/x' "$CURL_CALLS"
 }
@@ -34,14 +34,14 @@ EOF
 @test "notify refuses a message containing a gateway-key-shaped string" {
   run plugin/scripts/notify.sh "my key is sk-xxxxxxxxxxxxxxxxxxxxxxxx"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"looks like a gateway key"* ]]
+  [[ "$output" == *"looks like a gateway key"* ]] || return 1
   [ ! -s "$CURL_CALLS" ]
 }
 
 @test "notify refuses an environment dump" {
   run plugin/scripts/notify.sh "$(printf 'here:\nAWS_REGION=ca-central-1\nFOO=bar')"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"environment dump"* ]]
+  [[ "$output" == *"environment dump"* ]] || return 1
   [ ! -s "$CURL_CALLS" ]
 }
 
@@ -76,7 +76,7 @@ EOF
   plugin/scripts/shutdown-entry.sh foo "foo" "x" "free" "touch $TMP/stopped"
   DRY_RUN=1 run "$SHUTDOWN_DIR/40-foo.sh"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"would stop foo"* ]]
+  [[ "$output" == *"would stop foo"* ]] || return 1
   [ ! -e "$TMP/stopped" ]
   run "$SHUTDOWN_DIR/40-foo.sh"
   [ -e "$TMP/stopped" ]

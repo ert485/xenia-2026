@@ -48,7 +48,8 @@
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "CLAUDE_CONFIG_DIR": "/home/node/.claude",
-    "POWERLEVEL9K_DISABLE_GITSTATUS": "true"
+    "POWERLEVEL9K_DISABLE_GITSTATUS": "true",
+    "XENIA_VERIFY_ARGS": "--warn root-files"
   },
   "secrets": {
     "GATEWAY_KEY": {

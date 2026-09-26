@@ -4,6 +4,10 @@
 # session. Each test builds a fresh fixture repository, same shape as tests/agent-verify.bats'.
 
 setup() {
+  # Hermetic: the hook only ever reads XENIA_VERIFY_ARGS (see plugin/hooks/stop-verify.sh), but
+  # the agent harness that runs this suite sets it in the ambient environment, which would make
+  # the hook append it to every verifier call below unless we clear it first.
+  unset XENIA_VERIFY_ARGS
   export GIT_CONFIG_GLOBAL=/dev/null
   export GIT_CONFIG_SYSTEM=/dev/null
   export KIT="$BATS_TEST_DIRNAME/.."

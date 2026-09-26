@@ -1,0 +1,27 @@
+schemaVersion: "2.2"
+description: "Build and start the preview for one pull request on the Docker box (kit, spec section 9)."
+parameters:
+  Pr:
+    type: String
+    description: "Pull request number"
+    allowedPattern: "^[0-9]{1,6}$"
+  Repo:
+    type: String
+    description: "owner/repo of the public repository to build"
+    allowedPattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+  Sha:
+    type: String
+    description: "Head commit of the pull request (40 hex)"
+    allowedPattern: "^[0-9a-f]{40}$"
+  AppDir:
+    type: String
+    description: "Directory holding the compose file, relative to the repo root"
+    default: "."
+    allowedPattern: "^[A-Za-z0-9._/-]+$"
+mainSteps:
+  - action: aws:runShellScript
+    name: previewUp
+    inputs:
+      timeoutSeconds: "900"
+      runCommand:
+        - /srv/kit/infra/recipes/docker-box/box/preview-up.sh "{{ Pr }}" "{{ Repo }}" "{{ Sha }}" "{{ AppDir }}"

@@ -36,7 +36,7 @@ print("ok")'
 @test "shutdown entry: dry run names the instance and stops nothing" {
   DRY_RUN=1 run shutdown.d/10-gpu-box.sh
   [ "$status" -eq 0 ]
-  [[ "$output" == *"would stop i-0123456789abcdef0"* ]]
+  [[ "$output" == *"would stop i-0123456789abcdef0"* ]] || return 1
   ! grep -q 'stop-instances' "$AWS_CALLS"
 }
 
@@ -56,6 +56,6 @@ print("ok")'
 @test "gpu.sh model refuses a name that is not in models.yaml, before touching AWS" {
   GPU_PROFILE=cohack run scripts/gpu.sh model no-such-model
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no model named no-such-model"* ]]
+  [[ "$output" == *"no model named no-such-model"* ]] || return 1
   ! grep -q 'send-command' "$AWS_CALLS"
 }

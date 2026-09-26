@@ -48,7 +48,7 @@ status_json() { jq -r "$1" "$REPO/.agent/STATUS.json"; }
 
   verify
   [ "$status" -eq 0 ]
-  [[ "$output" == *"agent-verify: pass"* ]]
+  [[ "$output" == *"agent-verify: pass"* ]] || return 1
   [ "$(status_json .status)" = "pass" ]
   [ "$(status_json .commit)" = "$head_sha" ]
   [ "$(status_json .base)" = "$base_sha" ]
@@ -65,7 +65,7 @@ status_json() { jq -r "$1" "$REPO/.agent/STATUS.json"; }
   [ "$status" -eq 1 ]
   [ "$(status_json '[.reasons[] | select(.check=="proofs-unbacked")] | length')" -eq 1 ]
   msg=$(status_json '.reasons[] | select(.check=="proofs-unbacked") | .message')
-  [[ "$msg" == *"docs/proofs/2026-09-25-status.md"* ]]
+  [[ "$msg" == *"docs/proofs/2026-09-25-status.md"* ]] || return 1
 
   mkdir -p "$REPO/.agent-requests"
   echo "backed by docs/proofs/2026-09-25-status.md" > "$REPO/.agent-requests/001-status.result.md"
@@ -90,6 +90,25 @@ status_json() { jq -r "$1" "$REPO/.agent/STATUS.json"; }
   [ "$status" -ne 0 ]
 }
 
+@test "empty-files: an empty __init__.py and py.typed are spared, an empty other.py still blocks" {
+  mkdir -p "$REPO/pkg"
+  : > "$REPO/pkg/__init__.py"
+  : > "$REPO/pkg/py.typed"
+  : > "$REPO/pkg/other.py"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "empty python package files"
+
+  verify
+  [ "$status" -eq 1 ]
+  [ "$(status_json '[.reasons[] | select(.check=="empty-files")] | length')" -eq 1 ]
+  run jq -e '.reasons[] | select(.message | startswith("pkg/other.py"))' "$REPO/.agent/STATUS.json"
+  [ "$status" -eq 0 ] || return 1
+  run jq -e '.reasons[] | select(.message | contains("__init__.py"))' "$REPO/.agent/STATUS.json"
+  [ "$status" -ne 0 ] || return 1
+  run jq -e '.reasons[] | select(.message | contains("py.typed"))' "$REPO/.agent/STATUS.json"
+  [ "$status" -ne 0 ]
+}
+
 @test "replay Task 29: a hidden make-check failure blocks and an unjustified fallback warns" {
   printf 'check:\n\t@exit 1\n' > "$REPO/Makefile"
   echo 'make check 2>/dev/null || echo "make check not available"' >> "$REPO/scripts/hello.sh"
@@ -100,8 +119,8 @@ status_json() { jq -r "$1" "$REPO/.agent/STATUS.json"; }
   [ "$status" -eq 1 ]
   [ "$(status_json '[.reasons[] | select(.check=="make-check")] | length')" -eq 1 ]
   make_msg=$(status_json '.reasons[] | select(.check=="make-check") | .message')
-  [[ "$make_msg" == "Makefile:"* ]]
-  [[ "$make_msg" == *"2"* ]]
+  [[ "$make_msg" == "Makefile:"* ]] || return 1
+  [[ "$make_msg" == *"2"* ]] || return 1
   [ -f "$REPO/.agent/make-check.log" ]
 
   [ "$(status_json '[.warnings[] | select(.check=="failure-hiding")] | length')" -eq 1 ]
@@ -250,6 +269,6 @@ EOF
   run "$KIT/plugin/scripts/agent-verify.sh" --help
   [ "$status" -eq 0 ]
   for c in make-check proofs-unbacked empty-files root-files failure-hiding scripts-without-tests uncommitted-changes; do
-    [[ "$output" == *"$c"* ]]
+    [[ "$output" == *"$c"* ]] || return 1
   done
 }
