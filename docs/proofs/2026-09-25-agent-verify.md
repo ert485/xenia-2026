@@ -19,32 +19,151 @@ Date: 2026-09-25. Plan: `docs/superpowers/plans/2026-09-25-container-first-workf
 
 ## TDD evidence
 
-RED (`bats tests/agent-verify.bats`, with `plugin/scripts/agent-verify.sh` moved aside): all 16
-tests failed (14 from the initial implementation, plus two added in fix round 1 for findings 1 and
-3 below):
+Fix round 2 re-ran RED and GREEN for real (round 1's RED/GREEN blocks below had been edited by
+hand to the new test count rather than recaptured, which a re-review caught; both are now the
+literal, unedited output of the commands named above each block). The absolute local worktree path
+(`/Users/<name>/Code/xenia-2026/.claude/worktrees/build-verifier`) is shortened to `<worktree>`
+everywhere it appears in the blocks below, per the same convention used elsewhere in this proof;
+every other byte is exactly what the command printed, including the `[: : integer expression
+expected` messages and `jq` errors that come from `status_json` reading a `STATUS.json` the
+verifier never wrote (because it doesn't exist), which is what "not implemented yet" looks like
+under this test file's helpers.
+
+RED — `plugin/scripts/agent-verify.sh` moved aside (`mv plugin/scripts/agent-verify.sh
+"$TMPDIR/"`), then `bats tests/agent-verify.bats 2>&1 | tee "$TMPDIR/red.txt"; echo "exit=$?"`,
+then the script moved back and `git status --short plugin/scripts/` confirmed empty (no change
+recorded against the committed script). All 16 tests failed:
 
 ```
 1..16
 not ok 1 pass: a clean branch with a script change and a test change
+# (in test file tests/agent-verify.bats, line 50)
+#   `[ "$status" -eq 0 ]' failed
 not ok 2 replay Task 15: a fake proof is blocked until a result file backs it
+# (in test file tests/agent-verify.bats, line 65)
+#   `[ "$status" -eq 1 ]' failed
 not ok 3 replay Task 20: zero-byte and whitespace-only files block, .gitkeep is spared
+# (in test file tests/agent-verify.bats, line 87)
+#   `[ "$status" -eq 1 ]' failed
 not ok 4 replay Task 29: a hidden make-check failure blocks and an unjustified fallback warns
+# (in test file tests/agent-verify.bats, line 100)
+#   `[ "$status" -eq 1 ]' failed
 not ok 5 an ok-to-hide justification suppresses the failure-hiding warning
+# (in test file tests/agent-verify.bats, line 121)
+#   `[ "$(status_json '[.warnings[] | select(.check=="failure-hiding")] | length')" -eq 0 ]' failed with status 2
+# jq: error: Could not open file /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/5/repo/.agent/STATUS.json: No such file or directory
+# <worktree>/tests/agent-verify.bats: line 121: [: : integer expression expected
 not ok 6 root-files: stray untracked reports block; REPORT.md, an allow-listed name, and a new dir are spared
+# (in test file tests/agent-verify.bats, line 135)
+#   `[ "$status" -eq 1 ]' failed
 not ok 7 make-check: a check target removed since the base commit blocks
+# (in test file tests/agent-verify.bats, line 151)
+#   `[ "$status" -eq 1 ]' failed
 not ok 8 scripts-without-tests warns alone, not when a test also changed
+# (in test file tests/agent-verify.bats, line 161)
+#   `[ "$(status_json '[.warnings[] | select(.check=="scripts-without-tests")] | length')" -ge 1 ]' failed with status 2
+# jq: error: Could not open file /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/8/repo/.agent/STATUS.json: No such file or directory
+# <worktree>/tests/agent-verify.bats: line 161: [: : integer expression expected
 not ok 9 uncommitted-changes warns, dirty is true, and an uncommitted 0-byte file still blocks
+# (in test file tests/agent-verify.bats, line 175)
+#   `[ "$status" -eq 1 ]' failed
 not ok 10 --skip make-check never runs make: no log, and the check target's own side effect never happens
+# (in test file tests/agent-verify.bats, line 186)
+#   `[ "$status" -eq 0 ]' failed
 not ok 11 uncommitted-changes on a rename warns with the new path, not the old -> new form
+# (in test file tests/agent-verify.bats, line 196)
+#   `[ "$(status_json .dirty)" = "true" ]' failed
+# jq: error: Could not open file /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/11/repo/.agent/STATUS.json: No such file or directory
 not ok 12 --skip drops a check and --warn demotes one to pass
+# (in test file tests/agent-verify.bats, line 210)
+#   `[ "$(status_json '[.reasons[] | select(.check=="make-check")] | length')" -eq 0 ]' failed with status 2
+# jq: error: Could not open file /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/12/repo/.agent/STATUS.json: No such file or directory
+# <worktree>/tests/agent-verify.bats: line 210: [: : integer expression expected
 not ok 13 REPORT.md is never read as evidence, and the script names it exactly once
+# (in test file tests/agent-verify.bats, line 228)
+#   `[ "$status" -eq 1 ]' failed
 not ok 14 a bogus --base ref and running outside a git worktree both error
+# (in test file tests/agent-verify.bats, line 237)
+#   `[ "$status" -eq 2 ]' failed
 not ok 15 an unknown check name to --skip exits 2
+# (in test file tests/agent-verify.bats, line 246)
+#   `[ "$status" -eq 2 ]' failed
 not ok 16 --help lists all seven check names
+# (in test file tests/agent-verify.bats, line 251)
+#   `[ "$status" -eq 0 ]' failed
+
+The following warnings were encountered during tests:
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/1/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 49)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/2/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 64)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/3/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 86)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/4/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 99)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/5/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 120)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/6/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 134)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/7/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 150)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/8/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 160)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/9/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 174)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/10/repo --skip make-check` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 185)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/11/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 195)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/12/repo --skip make-check` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 209)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/13/repo` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 227)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/14/repo --base refs/does/not/exist` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 236)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --worktree /var/folders/dx/kg3b05jx0bl_bllr_3sbdlwh0000gn/T/bats-run-aB0GGO/test/15/repo --skip not-a-real-check` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       from function `verify' in file tests/agent-verify.bats, line 37,
+       in test file tests/agent-verify.bats, line 245)
+BW01: `run`'s command `<worktree>/tests/../plugin/scripts/agent-verify.sh --help` exited with code 127, indicating 'Command not found'. Use run's return code checks, e.g. `run -127`, to fix this message.
+      (from function `run' in file /opt/homebrew/Cellar/bats-core/1.14.0/lib/bats-core/test_functions.bash, line 442,
+       in test file tests/agent-verify.bats, line 250)
+exit=0
 ```
 
-GREEN (same command, script restored): all 16 pass, including the three replayed incidents and
-the two fix-round tests:
+`exit=0` above is `tee`'s exit code, not bats' (the pipeline has no `pipefail`, and this is the
+exact command the fix-round review specified); bats itself reported the failures inline as shown.
+
+GREEN — script restored, `git status --short plugin/scripts/` confirmed clean, then `bats
+tests/agent-verify.bats 2>&1 | tee "$TMPDIR/green.txt"; echo "exit=$?"`. All 16 pass:
 
 ```
 1..16
@@ -64,6 +183,7 @@ ok 13 REPORT.md is never read as evidence, and the script names it exactly once
 ok 14 a bogus --base ref and running outside a git worktree both error
 ok 15 an unknown check name to --skip exits 2
 ok 16 --help lists all seven check names
+exit=0
 ```
 
 `shellcheck -x plugin/scripts/agent-verify.sh scripts/agent-verify.sh` is clean (exit 0).
@@ -72,8 +192,9 @@ ok 16 --help lists all seven check names
 
 With `docs/proofs/2026-09-25-agent-verify.md` written as a stub (before this final version) and
 nothing else committed, `scripts/agent-verify.sh` (no flags) reported exactly one reason. The
-absolute local path in the `-> ...STATUS.json` line below has been shortened to `<worktree>`;
-every other byte is the real recorded output:
+absolute local path in the `-> ...STATUS.json` line in both blocks below (the blocked run and the
+`--warn` run) has been shortened to `<worktree>`; every other byte in both is the real recorded
+output:
 
 ```
 agent-verify: blocked (1 reasons, 9 warnings) -> <worktree>/.agent/STATUS.json
