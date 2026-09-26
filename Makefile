@@ -18,10 +18,14 @@ fmt:
 	@if [ -d infra ]; then terraform fmt -check -recursive infra; fi
 
 validate:
+	@if [ -z "$$TF_PLUGIN_CACHE_DIR" ]; then mkdir -p "$(CURDIR)/.terraform-plugin-cache"; fi
 	@for s in $(STACKS); do \
 	  [ -f infra/$$s/versions.tf ] || continue; \
 	  echo "validate infra/$$s"; \
-	  (cd infra/$$s && export TF_DATA_DIR=.terraform-validate && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
+	  (cd infra/$$s && export TF_DATA_DIR=.terraform-validate && \
+	    export TF_PLUGIN_CACHE_DIR="$${TF_PLUGIN_CACHE_DIR:-$(CURDIR)/.terraform-plugin-cache}" && \
+	    export TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE=true && \
+	    terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
 	done
 
 lint:

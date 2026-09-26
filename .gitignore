@@ -5,6 +5,7 @@
 .env
 .terraform/
 .terraform-validate/
+.terraform-plugin-cache/
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
