@@ -40,7 +40,7 @@ SH
 @test "refuses a missing or non-postgres container" {
   run "$BOX/restore.sh" "host/app-db-1/20260925T030000Z.sql.gz" missing
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no such container"* ]]
+  [[ "$output" == *"no such container"* ]] || return 1
   FAKE_IMAGE=redis:7 run "$BOX/restore.sh" "host/app-db-1/20260925T030000Z.sql.gz" app-db-1
   [ "$status" -eq 1 ]
   [[ "$output" == *"not postgres"* ]]
@@ -61,6 +61,6 @@ SH
 @test "an unexpected psql error fails the restore and is printed" {
   FAKE_PSQL_ERROR='relation "proof" does not exist' run "$BOX/restore.sh" "host/app-db-1/20260925T030000Z.sql.gz" app-db-1
   [ "$status" -eq 1 ]
-  [[ "$output" == *'relation "proof" does not exist'* ]]
+  [[ "$output" == *'relation "proof" does not exist'* ]] || return 1
   [[ "$output" != *'role "app" already exists'* ]]
 }

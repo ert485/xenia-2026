@@ -17,6 +17,6 @@ data "aws_iam_policy_document" "restore_read" {
 
 resource "aws_iam_role_policy" "restore_read" {
   name   = "restore-read-backups"
-  role   = "xenia-docker-box"
+  role   = aws_iam_role.box.id
   policy = data.aws_iam_policy_document.restore_read.json
 }

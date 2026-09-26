@@ -40,7 +40,7 @@ SH
   sed -i.bak 's/^previous=.*/previous=none/' "$CURRENT"
   run --separate-stderr "$R" --app-dir .
   [ "$status" -eq 1 ]
-  [[ "$stderr" == *"nothing to roll back to"* ]]
+  [[ "$stderr" == *"nothing to roll back to"* ]] || return 1
   ! grep -q 'xenia-deploy' "$CALLS"
 }
 
@@ -62,7 +62,7 @@ SH
 @test "--dry-run prints the plan with the account masked and sends nothing" {
   run --separate-stderr "$R" --app-dir . --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"would send xenia-deploy Repo=ert485/xenia-test-team"* ]]
+  [[ "$output" == *"would send xenia-deploy Repo=ert485/xenia-test-team"* ]] || return 1
   ! grep -q 'box.sh xenia-deploy' "$CALLS"
 }
 
@@ -78,4 +78,22 @@ SH
   run --separate-stderr "$R" --app-dir .
   [ "$status" -eq 0 ]
   grep -q "Sha=$A " "$CALLS"
+}
+
+@test "the real box/gateway.sh current prints previous=/repo=/sha=/image= lines that rollback.sh's field() parses" {
+  export APP_STATE_DIR="$BATS_TEST_TMPDIR/app-state"; mkdir -p "$APP_STATE_DIR"
+  # /srv/app/previous and current.json's "image" hold the FULL image ref (with registry host), as
+  # written by box/deploy.sh; gateway.sh strips the registry segment on the way out.
+  printf '111111111.dkr.ecr.ca-central-1.amazonaws.com/xenia/xenia-test-team:sha-%s\n' "$A" > "$APP_STATE_DIR/previous"
+  printf '{"repo":"ert485/xenia-test-team","sha":"%s","image":"111111111.dkr.ecr.ca-central-1.amazonaws.com/xenia/xenia-test-team:sha-%s"}\n' "$B" "$B" \
+    > "$APP_STATE_DIR/current.json"
+  export XENIA_ENV_FILE="$BATS_TEST_TMPDIR/xenia.env"; : > "$XENIA_ENV_FILE"
+  run "$BATS_TEST_DIRNAME/../infra/recipes/docker-box/box/gateway.sh" current
+  [ "$status" -eq 0 ]
+  # Same extraction rollback.sh's field() uses: take the last line starting with "<name>=".
+  field() { printf '%s\n' "$output" | sed -n "s/^$1=//p" | tail -1; }
+  [ "$(field previous)" = "xenia/xenia-test-team:sha-$A" ] || return 1
+  [ "$(field repo)" = "ert485/xenia-test-team" ] || return 1
+  [ "$(field sha)" = "$B" ] || return 1
+  [ "$(field image)" = "xenia/xenia-test-team:sha-$B" ] || return 1
 }
