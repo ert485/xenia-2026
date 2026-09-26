@@ -69,6 +69,10 @@ SH
   OLD_IMAGE="111111111.dkr.ecr.ca-central-1.amazonaws.com/xenia/xenia-test-team:sha-old"
   NEW_GOOD_IMAGE="111111111.dkr.ecr.ca-central-1.amazonaws.com/xenia/xenia-test-team:sha-newgood"
   NEW_BAD_IMAGE="111111111.dkr.ecr.ca-central-1.amazonaws.com/xenia/xenia-test-team:sha-newbad"
+  # Deliberately NOT what's running: $APP_STATE_DIR/previous is one generation behind by design
+  # (only a passing health check advances it), so a revert that reads the file instead of asking
+  # docker what's actually running would restore this instead of $OLD_IMAGE.
+  STALE_PREVIOUS_IMAGE="111111111.dkr.ecr.ca-central-1.amazonaws.com/xenia/xenia-test-team:sha-stale"
 }
 
 compose() { printf '%b' "$1" > "$TMP/compose.yml"; }
@@ -116,13 +120,16 @@ compose() { printf '%b' "$1" > "$TMP/compose.yml"; }
   [[ "$output" == *"deployed ert485/xenia-2026"* ]]
 }
 
-@test "an unhealthy deploy reverts to the previous image, keeps previous pointing at the old image, and exits 1" {
+@test "an unhealthy deploy reverts to the image actually running, not previous's stale value, and leaves previous untouched, exiting 1" {
+  # $RUNNING_IMAGE (what docker inspect reports) and $APP_STATE_DIR/previous are seeded to
+  # DIFFERENT images on purpose: if the revert ever read the file instead of asking docker what's
+  # running, it would redeploy $STALE_PREVIOUS_IMAGE and this test would catch it.
   printf '%s\n' "$OLD_IMAGE" > "$RUNNING_IMAGE"
-  printf '%s\n' "$OLD_IMAGE" > "$APP_STATE_DIR/previous"
+  printf '%s\n' "$STALE_PREVIOUS_IMAGE" > "$APP_STATE_DIR/previous"
   HEALTH_TIMEOUT=1 HEALTH_POLL_INTERVAL=1 run "$DEPLOY" ert485/xenia-2026 "$SHA" "$NEW_BAD_IMAGE" .
   [ "$status" -eq 1 ]
-  [ "$(cat "$APP_STATE_DIR/previous")" = "$OLD_IMAGE" ]
   [ "$(cat "$RUNNING_IMAGE")" = "$OLD_IMAGE" ]
+  [ "$(cat "$APP_STATE_DIR/previous")" = "$STALE_PREVIOUS_IMAGE" ]
   [ "$(grep -c ' up -d --no-build --remove-orphans' "$CALLS")" -eq 2 ]
   [[ "$output" == *"rolled back to $OLD_IMAGE"* ]]
 }
