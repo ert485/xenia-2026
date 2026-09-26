@@ -97,6 +97,7 @@ Each preserves the spec's intent and its section 17 test. Erik reads these first
 12. **The team infra role's instance-type allow-list can't see inside launch templates or fleets** (Task 30, D39). IAM checks `ec2:InstanceType` on `RunInstances` and `ec2:Attribute/InstanceType` on `ModifyInstanceAttribute`, but no condition key exposes the type inside a launch template, EC2 Fleet, Spot Fleet, or Spot request. So instead of "deny those for types outside the list", the infra role is denied those launch paths outright; `aws_instance` works. Managed services that start their own instances (EKS node groups, Batch, EMR, SageMaker) are not covered; the budget alerts are the backstop. The spec's §7 says the same.
 13. **`infra/org` imports the organization to enable SCPs** (Task 14, D40). Terraform enables a policy type only through `aws_organizations_organization`, so the hand-made organization is imported with `prevent_destroy` and `ignore_changes` on trusted access and the feature set: an apply can add the SCP policy type and nothing else. Runbook 99 removes it from state before `teardown.sh --all`.
 14. **`CODEOWNERS` owns only the rules files, not the wider blast-radius set** (Erik's decision, 2026-09-24). `PRINCIPLES.md`, `PRINCIPLES-EXTENDED.md`, and `CODEOWNERS` itself are the only code-owned paths; `.github/workflows/`, `.devcontainer/`, the vendored plugin, `Makefile`, compose files, and `infra/team/**` all self-merge once `make check` and shutdown coverage pass. Rules edits are rare and a team agreement, worth a second reviewer; the other paths change often mid-event as agents fix CI, and a second-owner gate there added little given every member's near-admin AWS access. The residual risk (an agent tricked into leaking the gateway CI key or the Discord webhook) is covered by per-key budgets, one-step rotation, `gitleaks`, fork skip, and the reviewer ranking CI/secrets changes as a finding.
+15. **Task 31, the overnight self-improvement loop, is an addition, not in the spec** (Erik's decision, 2026-09-25). It restarts the GPU box for the night after Task 22's shutdown step (about nine hours of on-demand time, about $17, covered by `shutdown.d/10-gpu-box.sh`), runs only from Erik's laptop and in firewalled containers with its own $5 key, and changes nothing teams see unless Erik adopts a result (Task 31 step 16). The cut `docs/deferred/evals-template.md` (Task 29) is a different thing, an eval harness for teams' own LLM features, and stays cut.
 
 ## Review Focus
 
@@ -131,6 +132,7 @@ Input classes the spec implies but no task's tests would otherwise exercise, mos
 | Fri: team-repo rehearsal on `ert485/xenia-test-team` (Erik's follow-up, v2.6) | 22 steps 14 to 17 | first team-repo merge 200 on `app.` in under five minutes (success criterion 1 from a team repo, not only the kit); team-repo preview; team infra by PR if Task 30 landed; lockdown cuts a live session and a CI role, gateway stays up, `--undo` restores |
 | Fri: load test past capacity, EBS snapshot | 22 | `docs/proofs/2026-09-25-load-test.md` with tokens per second, queueing, watchdog result |
 | Fri evening: examples torn down, GPU box stopped, everything else up | 22 | `status.sh` shows Docker box up, GPU stopped, no previews |
+| Friday night to Saturday morning: overnight self-improvement loop on the GPU box (Erik's decision, 2026-09-25; not in the spec) | 31 (dry run on Bedrock Friday afternoon, after 22 step 7; GPU box restarted for the night after 22 step 20) | `docs/proofs/2026-09-25-overnight-dry-run.md`; `docs/proofs/2026-09-26-overnight-loop.md` with the DEV curve, the plateau point, and held-out baseline against best; Erik's Saturday-defaults decision (31 step 16) |
 | Sat 08:00: `gpu.sh start`, `status.sh` green | runbook 06 | |
 
 Anything in the Must tier not proven by Friday night is reported as such in `docs/proofs/README.md`, not left half-built. Should-tier items ship as templates with a "not proven" note in their README (spec §15).
@@ -153,10 +155,11 @@ Anything in the Must tier not proven by Friday night is reported as such in `doc
 | Access kill switch: `lockdown.sh` denies a live `hackathon-dev` session and a CI role, gateway still 200, `--undo` restores; first team-repo merge reaches `app.` in under five minutes | 14 (script, SCP), 22 steps 14 and 17 (live) |
 | Should: `contract-check.yml` fails a PR that removes a response field, passes with `breaking-ok` | 23 |
 | Should: a PR adding a tagged `t4g.nano` gets one plan comment and merging applies it; a PR removing it pauses at the gate and posts to Discord until `destroy-ok`; an `m7i.8xlarge` is denied | 30 (and 22 step 16 when Task 30 has landed) |
+| Should, beyond §17 (Erik's decision, 2026-09-25): the overnight loop's judge self-test fails a no-op solution and a lax check; a loop container reaches the gateway and not GitHub; a changed judge aborts the run; `overnight.sh stop` leaves no containers; the morning report shows DEV rounds, the plateau, and held-out baseline against best | 31 |
 
 ## Execution notes
 
-- **Branches and PRs.** Work on a short-lived branch per task group, merge by PR as soon as the group's proof passes, because `deploy-docker-box.yml` and `publish-kit-site.yml` watch `main`. Suggested groups: Tasks 1 to 5 (`build/foundation`), 6 to 8 (`build/gateway`), 9 to 10 (`build/deploy-gpu`), 11 to 14 (`build/plugin-previews-shutdown`), 15 to 18 (`build/ops-onboarding-review`), 19 to 22 (`build/site-kit-proofs`), then one branch per Should task, then `build/deferred`.
+- **Branches and PRs.** Work on a short-lived branch per task group, merge by PR as soon as the group's proof passes, because `deploy-docker-box.yml` and `publish-kit-site.yml` watch `main`. Suggested groups: Tasks 1 to 5 (`build/foundation`), 6 to 8 (`build/gateway`), 9 to 10 (`build/deploy-gpu`), 11 to 14 (`build/plugin-previews-shutdown`), 15 to 18 (`build/ops-onboarding-review`), 19 to 22 (`build/site-kit-proofs`), then one branch per Should task (Task 31: `should/overnight-loop` Friday afternoon, `should/overnight-loop-night` Saturday morning), then `build/deferred`.
 - **Terraform applies are Erik's to approve** (spec §15). Every apply step below says `scripts/tf.sh <stack> apply` and expects Erik to type `yes`. Never `-auto-approve`.
 - **Costs start with Task 6.** Task 6 starts the Docker box (about $1.60 a day). Task 10 starts the GPU box (about $1.86 an hour); stop it with `scripts/gpu.sh stop` whenever nobody is testing it.
 - **Proof artifacts** go under `docs/proofs/` as short markdown files with the command, the output (redacted through `scripts/ci/leak-check.sh`), and the time. The leak check runs over `docs/` in `make check`, so a pasted account ID fails the build.
@@ -177,7 +180,8 @@ xenia-2026/
   scripts/*.sh                     # bootstrap, box, gateway-key, onboard-*, offboard-teammate, onboard-repo, rotate-key,
                                    # shutdown, startup, status, cost, gpu, logs, doctor, teardown, put-secret,
                                    # render-shutdown-md, build-site, print-kit, loadtest, rollback, restore, snapshot, pain-review,
-                                   # lockdown (the access kill switch, Task 14)
+                                   # lockdown (the access kill switch, Task 14), overnight (the overnight loop, Task 31)
+  scripts/lib/overnight.py         # Task 31: judge manifest, knob bounds, one-idea check, scores, keep/drop, research log
   shutdown.d/{10-gpu-box.sh,20-docker-box.sh,30-previews.sh}
   SHUTDOWN.md                      # rendered by `make shutdown-md`, checked in CI
   tests/*.bats, tests/fixtures/    # bats tests for every script with logic
@@ -210,6 +214,10 @@ xenia-2026/
   docs/option-a-claude-platform-on-aws.md
   docs/deferred/*.md
   docs/proofs/*.md
+  evals/                           # Task 31, the overnight loop's frozen judge and records:
+                                   # tasks/{dev (18),heldout (12)}/<family>-<nn>.sh, runner/{judge,lib,agent-run,strict-egress}.sh,
+                                   # selftest.sh, judge.sha256, harness/baseline/, prompts/{researcher,eval-author}.md,
+                                   # proposed/<date>/ (eval refresh), runs/<date>/{log.json,log.md,best/}
 ```
 
 ---
@@ -16927,6 +16935,3738 @@ gh pr create --title "Team infrastructure proof record" --body "$(printf 'Proof 
 gh pr checks --watch && gh pr merge --squash --delete-branch
 ```
 Expected: the leak check prints nothing; `check` and `shutdown-coverage` green; merged. If Friday ran out before step 13, skip this step: the templates already say the tier is not proven.
+
+### Task 31: Overnight self-improvement loop on the idle GPU box (Should tier; runs Friday, after Task 22's load test)
+
+Erik's decision (2026-09-25), made after spec v2.6, so no spec section owns it; the acceptance tables above map it. Task 22's last step leaves the GPU box stopped for the night; this loop restarts it (about nine hours of on-demand time at about $1.86 an hour for a g6e.xlarge, about $17, covered by `shutdown.d/10-gpu-box.sh`) and uses it. No model is trained or changed: the loop edits prompt files, skills, and vLLM serving settings for the team's own Claude Code setup, and Anthropic does not support Claude Code against non-Claude models through a gateway (spec D7), so problems on this path are ours. What the loop does: it runs a frozen set of small coding tasks through the team's own agent setup, forms a theory about what would raise the pass rate, changes one thing, measures again, and keeps the change only when it beats measured noise. The morning report answers one question: does the setup improve itself, or does it hit a ceiling, and where? Whatever wins on the held-out tasks is Erik's to adopt as the Saturday defaults (step 16). Should tier: Must-adjacent, because Saturday's defaults are Must, but nothing Saturday depends on the loop having run.
+
+It runs after Task 22 step 7 (the load test picks `max_num_seqs`, the loop's starting point) and after Task 22 step 20 (which leaves the GPU box stopped; step 14 below starts it again for the night).
+
+**Files:**
+- Create: `scripts/lib/overnight.py`, `scripts/overnight.sh`, `tests/overnight.bats`, `evals/README.md`, `evals/selftest.sh`, `evals/judge.sha256`, `evals/runner/{judge.sh,lib.sh,agent-run.sh,strict-egress.sh}`, `evals/tasks/dev/{bugfix,feature,refactor,answer,multifile,shell}-0{1,2,3}.sh` (18), `evals/tasks/heldout/{bugfix,feature,refactor,answer,multifile,shell}-0{4,5}.sh` (12), `evals/harness/baseline/{knobs.json,HYPOTHESIS.md}`, `evals/prompts/{researcher.md,eval-author.md}`, `evals/proposed/README.md`
+- Modify: `scripts/gpu.sh` (`tune` subcommand), `Makefile` (`evals` joins `check`; `evals/` joins `SCRIPTS` and `leak`), `.gitignore` (loop scratch state)
+- Proof: `docs/proofs/2026-09-25-overnight-dry-run.md` (Friday afternoon), `docs/proofs/2026-09-26-overnight-loop.md` plus `evals/runs/2026-09-25/{log.json,log.md,best/}` (Saturday morning)
+
+**Interfaces:**
+- Consumes: `scripts/gpu.sh start|stop|status|model <name>` and `/etc/xenia/vllm.env` on the box (Task 10); `infra/recipes/gpu-box/models.yaml` (`default`, `max_num_seqs` from Task 22 step 7); `scripts/gateway-key.sh generate <alias> <max_budget_usd>` (Task 7); the gateway at `https://llm.26.cohack.tetl.ca` with the `x-litellm-model-id` values `qwen3-coder-vllm` and `qwen3-coder-bedrock` (Task 7); the dev container image `ghcr.io/ert485/xenia-2026-devcontainer:main` with Claude Code 2.1.280 and `/usr/local/bin/init-firewall.sh` (Task 8); `scripts/lib/common.sh` (Task 1); `shutdown.d/10-gpu-box.sh` (the GPU box's off switch).
+- Produces:
+  - **The frozen judge**: `evals/tasks/{dev,heldout}/<family>-<nn>.sh`, six families (`bugfix`, `feature`, `refactor`, `answer`, `multifile`, `shell`), 18 DEV tasks (three per family) and 12 held-out (two per family). Each task file is bash with a `# family: <name>` line, `PROMPT='Agent: ...'`, and three functions run in the task's directory: `fixture` (writes the starting repo), `check` (exit 0 only when the job is done; it runs hidden assertions the agent never sees, on a scratch copy), `solve` (the reference solution, used only by the self-test); optional `after_commit` (files that must start untracked). `evals/runner/judge.sh prompt|fixture|check|selftest <task-file> [dir]` is the only thing that executes a task file. `evals/judge.sha256` (from `overnight.py manifest evals`) pins `evals/tasks/` and `evals/runner/`.
+  - `scripts/overnight.sh start [--until 07:00] [--backend vllm|bedrock] [--eval-refresh] [--limit N] [--rounds N] [--plateau 4] [--key-file ~/.xenia-overnight-key] | stop | status | report [<date>] | admit <date>`.
+  - `scripts/gpu.sh tune <knobs.json>`: restarts vLLM on the default model with `TOOL_PARSER`, `MAX_NUM_SEQS`, and `EXTRA_ARGS='--override-generation-config {json}'` (sampling defaults) from the file; `scripts/gpu.sh model <default>` restores `models.yaml`'s settings.
+  - `knobs.json`: `{"tool_parser": "qwen3_xml"|"qwen3_coder", "max_num_seqs": 4..16, "sampling": {temperature 0..2, top_p 0.01..1, top_k -1 or 1..200, repetition_penalty 0.8..1.5}}`, bounds enforced in `overnight.py` (`knob_errors`) before anything reaches the box.
+  - **The research log** `evals/runs/<date>/log.json` (machine-readable) and `log.md` (rendered): per round the hypothesis, the one knob group changed (`claude_md`, `system_prompt`, `skills`, `tool_parser`, `sampling`, `max_num_seqs`), the DEV score (pass rate per repetition, mean, spread), the delta against the best, keep, drop, void, or rejected with the reason, wall time, and tokens; then the summary (what helped, what didn't, the plateau point, held-out baseline against best, the eval-refresh section when on). `evals/runs/<date>/best/` is the winning harness.
+
+Decisions recorded here (judgment calls, Erik reviews them with the task):
+
+- **The scheduler runs on Erik's laptop; every agent session runs in a container.** Only the scheduler holds AWS credentials, because only it may restart vLLM (`gpu.sh tune`, between rounds, never during one). The containers get the loop's gateway key and nothing else: no AWS credentials, no GitHub token, no kit checkout, so they can't push to the kit repo or deploy.
+- **Egress is stricter than the dev container's: the gateway only.** `evals/runner/strict-egress.sh` runs the dev container's `init-firewall.sh`, then empties its allow-list and adds back only `llm.26.cohack.tetl.ca`. The kit repo is public, held-out tasks included; with GitHub unreachable the loop can't read them, and it needs no other host (fixtures are self-contained: python3, node, bash, git, make, no packages).
+- **The judge is never mounted where an agent runs.** Fixtures are written and checks run in a separate `--network none` container that mounts `evals/runner` and one split of `evals/tasks` read-only; the agent container sees only its run directory and the harness under test. The scheduler also compares the judge's checksum with the one taken at start before every round, and any difference aborts the run. The held-out split is mounted only for the final scoring, after the last researcher session.
+- **One idea per round, on its own branch.** The scratch repo `evals/runs/<date>/harness/` (gitignored) has `baseline` (never moves), `best` (moves on keep), and `round-<n>`. The researcher edits a plain copy (no `.git`, so it can't move branches); the scheduler commits it as `round-<n>` and `overnight.py validate` rejects anything that changes more than one knob group, touches a path outside the harness, reuses the previous `HYPOTHESIS.md`, or leaves a bound.
+- **Noise is measured, not assumed.** The baseline runs twice (six repetitions of every DEV task). A change is kept only if its DEV mean beats the best by more than the largest of: the two baseline runs' difference, twice the combined standard error of the two means, and one task's worth (1/18). `max_num_seqs` changes throughput, not answers, so it is kept when tasks per hour rise 10% or more with the pass rate inside that margin; the loop runs `max_num_seqs` sessions in parallel, so the knob changes real queueing.
+- **Bedrock spill voids a round.** Once a minute during a round the scheduler asks the gateway which deployment served a one-token request; if any answer is `qwen3-coder-bedrock`, the round is `void` (not kept, not counted toward the plateau), because it measured a different model. The key's $5 budget caps what spill can cost, and half a round refused for budget ends the night.
+- **Sampling may be a no-op.** vLLM's `--override-generation-config` only sets defaults; if Claude Code sends `temperature` on every request, the request wins. The report lists sampling rounds like any other; if all of them land inside the noise, treat the knob as unverified, not as proven useless.
+- **The loop restores vLLM's defaults when it ends** (`gpu.sh model <default>`), so Saturday never starts on an experimental parser by accident. Adoption is a separate, human step (step 16).
+- **Eval refresh is a gated phase, off the first night.** When DEV scores stop improving for `--plateau` rounds (default 4), the loop does not touch its own judge. With `--eval-refresh`, a separate eval-author session (its own container, DEV tasks visible, held-out not) writes up to three new task families into `evals/proposed/<date>/`; each must pass the self-test, then the baseline harness must pass it on 20% to 80% of three tries (not trivial, not impossible). Survivors are only recorded: `scripts/overnight.sh admit <date>` adds them to DEV for a later night, through a reviewed PR. The held-out set never changes. The first night runs without it, for a clean ceiling measurement.
+- **No new `shutdown.d/` entry.** The only billable thing the loop starts is the GPU box, already covered by `shutdown.d/10-gpu-box.sh`; its containers run on the laptop and its tokens are capped by the key's budget; `overnight.sh stop` is its off switch.
+
+- [ ] **Step 1: Write the failing `tests/overnight.bats`**
+
+```bash
+#!/usr/bin/env bats
+# Task 31: the overnight loop's decisions (scripts/lib/overnight.py), gpu.sh tune, and the
+# overnight.sh commands that run without Docker or AWS.
+setup() {
+  cd "$BATS_TEST_DIRNAME/.."
+  export TMP="$BATS_TEST_TMPDIR"
+  PY="$PWD/.venv/bin/python"; [ -x "$PY" ] || PY=python3
+  export PY LIB="$PWD/scripts/lib/overnight.py"
+  base="$TMP/best"; cand="$TMP/cand"
+  mkdir -p "$base/skills"
+  printf '{"tool_parser": "qwen3_xml", "max_num_seqs": 8, "sampling": {}}\n' > "$base/knobs.json"
+  printf 'Baseline.\n' > "$base/HYPOTHESIS.md"
+  cp -R "$base" "$cand"
+}
+
+# run_json <round-dir> <task> <rep> <pass>: one fake run.json
+run_json() {
+  mkdir -p "$1/$2.$3"
+  printf '{"task":"%s","rep":%s,"pass":%s,"error":null,"wall":60,"tokens_in":1000,"tokens_out":100}\n' "$2" "$3" "$4" > "$1/$2.$3/run.json"
+}
+
+# fake_round <dir> <wall_s> <passes per rep, e.g. "2 2 1">: four tasks, a..d, the first N pass
+fake_round() {
+  local d="$1" rep=0 n t i
+  mkdir -p "$d"
+  printf '{"wall_s": %s}\n' "$2" > "$d/round.json"
+  for n in $3; do
+    rep=$((rep + 1)); i=0
+    for t in a b c d; do
+      i=$((i + 1))
+      if [ "$i" -le "$n" ]; then run_json "$d" "$t" "$rep" true; else run_json "$d" "$t" "$rep" false; fi
+    done
+  done
+}
+
+# fake_log <best-score-json> <noise>
+fake_log() {
+  jq -n --argjson s "$1" --argjson n "$2" \
+    '{date:"2026-09-25",backend:"vllm",model:"qwen3-coder",judge_sha:"0123456789abcdef",dev_tasks:4,heldout_tasks:2,reps:3,
+      plateau_n:2,eval_refresh:false,noise:$n,best:"baseline",plateau_at:null,heldout:{},eval_refresh_log:[],
+      rounds:[{round:"baseline",group:"baseline",hypothesis:"baseline",score:$s,decision:"baseline",delta:null}]}' > "$TMP/log.json"
+}
+
+@test "manifest: stable, and it changes when a judge file changes" {
+  mkdir -p "$TMP/e/tasks/dev" "$TMP/e/runner"
+  printf 'x\n' > "$TMP/e/tasks/dev/t.sh"; printf 'y\n' > "$TMP/e/runner/judge.sh"
+  one="$("$PY" "$LIB" manifest "$TMP/e")"
+  [ "$one" = "$("$PY" "$LIB" manifest "$TMP/e")" ]
+  [ "$(printf '%s\n' "$one" | wc -l | tr -d ' ')" -eq 2 ]
+  printf 'z\n' >> "$TMP/e/tasks/dev/t.sh"
+  [ "$one" != "$("$PY" "$LIB" manifest "$TMP/e")" ]
+}
+
+@test "the committed judge manifest matches evals/" {
+  run diff <("$PY" "$LIB" manifest evals) evals/judge.sha256
+  [ "$status" -eq 0 ]
+}
+
+@test "deadline: the next 07:00 in CST, today or tomorrow" {
+  # 2026-09-25 23:00 CST is 2026-09-26 05:00 UTC = 1790398800
+  run "$PY" "$LIB" deadline 07:00 --now 1790398800
+  [ "$output" -eq $((1790398800 + 8 * 3600)) ]
+  run "$PY" "$LIB" deadline 22:00 --now 1790398800
+  [ "$output" -eq $((1790398800 + 23 * 3600)) ]
+  run "$PY" "$LIB" deadline 7am
+  [ "$status" -eq 1 ]
+}
+
+@test "validate: one CLAUDE.md change with a new hypothesis is one idea" {
+  printf 'Agent: run the tests before you say you are done.\n' > "$cand/CLAUDE.md"
+  printf 'Running tests first raises the pass rate.\n' > "$cand/HYPOTHESIS.md"
+  run "$PY" "$LIB" validate "$base" "$cand"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .group <<< "$output")" = claude_md ]
+}
+
+@test "validate: two ideas in one round are rejected" {
+  printf 'Agent: be brief.\n' > "$cand/CLAUDE.md"
+  printf '{"tool_parser": "qwen3_coder", "max_num_seqs": 8, "sampling": {}}\n' > "$cand/knobs.json"
+  printf 'Two things.\n' > "$cand/HYPOTHESIS.md"
+  run "$PY" "$LIB" validate "$base" "$cand"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"one idea per round: this changes claude_md, tool_parser"* ]]
+}
+
+@test "validate: files outside the harness, a stale hypothesis, and bad knobs are rejected" {
+  printf 'x' > "$cand/run.sh"; printf 'New.\n' > "$cand/HYPOTHESIS.md"
+  run "$PY" "$LIB" validate "$base" "$cand"
+  [[ "$output" == *"path not allowed: run.sh"* ]]
+  rm "$cand/run.sh"; cp "$base/HYPOTHESIS.md" "$cand/HYPOTHESIS.md"; printf 'Agent: x\n' > "$cand/CLAUDE.md"
+  run "$PY" "$LIB" validate "$base" "$cand"
+  [[ "$output" == *"HYPOTHESIS.md must be rewritten"* ]]
+  printf 'Bigger batch.\n' > "$cand/HYPOTHESIS.md"; rm "$cand/CLAUDE.md"
+  printf '{"tool_parser": "qwen3_xml", "max_num_seqs": 32, "sampling": {}}\n' > "$cand/knobs.json"
+  run "$PY" "$LIB" validate "$base" "$cand"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"max_num_seqs must be an integer from 4 to 16"* ]]
+  printf '{"tool_parser": "hermes", "max_num_seqs": 8, "sampling": {"temperature": 3}}\n' > "$cand/knobs.json"
+  run "$PY" "$LIB" validate "$base" "$cand"
+  [[ "$output" == *"tool_parser must be one of"* && "$output" == *"sampling.temperature must be a number from 0.0 to 2.0"* ]]
+}
+
+@test "validate: a skill needs front matter" {
+  mkdir -p "$cand/skills/tests-first"; printf 'Run tests.\n' > "$cand/skills/tests-first/SKILL.md"
+  printf 'A skill.\n' > "$cand/HYPOTHESIS.md"
+  run "$PY" "$LIB" validate "$base" "$cand"
+  [[ "$output" == *"needs front matter"* ]]
+  printf -- '---\nname: tests-first\ndescription: Run the tests before finishing.\n---\nRun tests.\n' > "$cand/skills/tests-first/SKILL.md"
+  run "$PY" "$LIB" validate "$base" "$cand"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .group <<< "$output")" = skills ]
+}
+
+@test "score: pass rate per repetition, mean, spread, throughput, tokens" {
+  fake_round "$TMP/r" 1800 "2 3 1"
+  run "$PY" "$LIB" score "$TMP/r"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .reps <<< "$output")" = '[0.5,0.75,0.25]' ]
+  [ "$(jq .mean <<< "$output")" = 0.5 ]
+  [ "$(jq .sd <<< "$output")" = 0.25 ]
+  [ "$(jq '.tasks_per_hour == 24' <<< "$output")" = true ]
+  [ "$(jq .tokens_in <<< "$output")" = 12000 ]
+  [ "$(jq -c .per_task <<< "$output")" = '{"a":3,"b":2,"c":1,"d":0}' ]
+}
+
+@test "score over two rounds stacks their repetitions (the baseline's six)" {
+  fake_round "$TMP/a" 600 "2 2 2"; fake_round "$TMP/b" 600 "3 3 3"
+  run "$PY" "$LIB" score "$TMP/a" "$TMP/b"
+  [ "$(jq '.reps | length' <<< "$output")" -eq 6 ]
+  [ "$(jq .mean <<< "$output")" = 0.625 ]
+}
+
+@test "decide: keep only above the margin; inside the noise is a drop; Bedrock spill is void" {
+  fake_round "$TMP/b" 1800 "2 2 2"; fake_log "$("$PY" "$LIB" score "$TMP/b")" 0.25
+  fake_round "$TMP/big" 1800 "4 4 4"
+  run "$PY" "$LIB" decide "$TMP/log.json" <("$PY" "$LIB" score "$TMP/big") claude_md
+  [ "$(jq -r .decision <<< "$output")" = keep ]
+  fake_round "$TMP/small" 1800 "3 3 3"
+  run "$PY" "$LIB" decide "$TMP/log.json" <("$PY" "$LIB" score "$TMP/small") claude_md
+  [ "$(jq -r .decision <<< "$output")" = drop ]
+  [ "$(jq .margin <<< "$output")" = 0.25 ]
+  run "$PY" "$LIB" decide "$TMP/log.json" <("$PY" "$LIB" score "$TMP/big") claude_md --spilled
+  [ "$(jq -r .decision <<< "$output")" = void ]
+}
+
+@test "decide: a max_num_seqs change is kept for 10% more throughput at an unchanged pass rate" {
+  fake_round "$TMP/b" 1800 "2 2 2"; fake_log "$("$PY" "$LIB" score "$TMP/b")" 0.25
+  fake_round "$TMP/fast" 1500 "2 2 2"
+  run "$PY" "$LIB" decide "$TMP/log.json" <("$PY" "$LIB" score "$TMP/fast") max_num_seqs
+  [ "$(jq -r .decision <<< "$output")" = keep ]
+  fake_round "$TMP/same" 1750 "2 2 2"
+  run "$PY" "$LIB" decide "$TMP/log.json" <("$PY" "$LIB" score "$TMP/same") max_num_seqs
+  [ "$(jq -r .decision <<< "$output")" = drop ]
+}
+
+@test "streak: rounds since the last keep, void rounds not counted" {
+  fake_round "$TMP/b" 1800 "2 2 2"; fake_log "$("$PY" "$LIB" score "$TMP/b")" 0.25
+  jq '.rounds += [{round:"round-1",decision:"drop"},{round:"round-2",decision:"keep"},{round:"round-3",decision:"drop"},
+                  {round:"round-4",decision:"void"},{round:"round-5",decision:"rejected"}]' "$TMP/log.json" > "$TMP/l2.json"
+  run "$PY" "$LIB" streak "$TMP/l2.json"
+  [ "$output" -eq 2 ]
+}
+
+@test "sanity: a proposed task is admitted only between 20% and 80%" {
+  printf '{"reps":[0,0,0],"per_task":{"easy":3,"hard":0,"mid1":1,"mid2":2}}\n' > "$TMP/s.json"
+  run "$PY" "$LIB" sanity "$TMP/s.json"
+  [ "$(jq -r .easy.verdict <<< "$output")" = "reject: too easy" ]
+  [ "$(jq -r .hard.verdict <<< "$output")" = "reject: too hard" ]
+  [ "$(jq -r .mid1.verdict <<< "$output")" = admit ]
+  [ "$(jq -r .mid2.verdict <<< "$output")" = admit ]
+}
+
+@test "render: rounds table, summary, held-out, and no key material" {
+  fake_round "$TMP/b" 1800 "2 2 2"; fake_log "$("$PY" "$LIB" score "$TMP/b")" 0.25
+  jq --argjson s "$("$PY" "$LIB" score "$TMP/b")" '.heldout.baseline = $s' "$TMP/log.json" > "$TMP/l2.json"
+  run "$PY" "$LIB" render "$TMP/l2.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"| baseline | baseline |"* ]]
+  [[ "$output" == *"What helped:"*"nothing beat the noise floor"* ]]
+  [[ "$output" == *"Baseline: 50.0% ± 0.0%"* ]]
+  [[ "$output" != *"sk-"* ]]
+}
+
+@test "tune-args: sampling becomes one single-quoted EXTRA_ARGS line; empty sampling clears it" {
+  printf '{"tool_parser": "qwen3_coder", "max_num_seqs": 12, "sampling": {"top_p": 0.8, "temperature": 0.2}}\n' > "$TMP/k.json"
+  run "$PY" "$LIB" tune-args "$TMP/k.json" infra/recipes/gpu-box/models.yaml
+  [ "$status" -eq 0 ]
+  IFS=$'\t' read -r repo parser seqs b64 <<< "$output"
+  [ "$parser" = qwen3_coder ] && [ "$seqs" = 12 ]
+  [ "$(printf '%s' "$b64" | base64 --decode)" = "EXTRA_ARGS='--override-generation-config {\"temperature\":0.2,\"top_p\":0.8}'" ]
+  run "$PY" "$LIB" tune-args "$base/knobs.json" infra/recipes/gpu-box/models.yaml
+  IFS=$'\t' read -r repo parser seqs b64 <<< "$output"
+  [ "$(printf '%s' "$b64" | base64 --decode)" = "EXTRA_ARGS=''" ]
+}
+
+@test "gpu.sh tune refuses out-of-bounds knobs before touching AWS" {
+  export AWS_CALLS="$TMP/aws-calls"; : > "$AWS_CALLS"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$AWS_CALLS"\n' > "$TMP/aws"; chmod +x "$TMP/aws"
+  printf '{"tool_parser": "qwen3_xml", "max_num_seqs": 99, "sampling": {}}\n' > "$TMP/k.json"
+  PATH="$TMP:$PATH" GPU_PROFILE=cohack run scripts/gpu.sh tune "$TMP/k.json"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"knobs rejected"* ]]
+  [ ! -s "$AWS_CALLS" ]
+}
+
+# capture_tune <knobs.json>: run gpu.sh tune against a fake aws; the command it sends to the box
+# lands in $TMP/box/cmd.sh, pointed at a fake vllm.env ($TMP/box/vllm.env) and a fake docker.
+capture_tune() {
+  export AWS_CALLS="$TMP/aws-calls"; : > "$AWS_CALLS"
+  cat > "$TMP/aws" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AWS_CALLS"
+case "$*" in
+  *"ec2 describe-instances"*) printf 'i-0123456789abcdef0\trunning\tg6e.xlarge\n' ;;
+  *"ssm send-command"*) printf '%s\n' "$*" | grep -o "{\"commands\".*}" > "$(dirname "$AWS_CALLS")/sent.json"; echo cmd-1 ;;
+  *"get-command-invocation"*"--query Status"*) echo Success ;;
+  *"get-command-invocation"*) printf 'out\t\n' ;;
+esac
+EOF
+  chmod +x "$TMP/aws"
+  PATH="$TMP:$PATH" GPU_PROFILE=cohack run scripts/gpu.sh tune "$1"
+  [ "$status" -eq 0 ]
+  mkdir -p "$TMP/box/bin" "$TMP/box/recipe"
+  printf '#!/usr/bin/env bash\necho "docker $*" >> %s/box/docker.log\n' "$TMP" > "$TMP/box/bin/docker"; chmod +x "$TMP/box/bin/docker"
+  jq -r '.commands[0]' "$TMP/sent.json" \
+    | sed -e "s|/etc/xenia/vllm.env|$TMP/box/vllm.env|" -e "s|/srv/kit/infra/recipes/gpu-box|$TMP/box/recipe|" > "$TMP/box/cmd.sh"
+}
+
+default_repo() { "$PY" -c 'import yaml; d = yaml.safe_load(open("infra/recipes/gpu-box/models.yaml")); print(d["models"][d["default"]]["repo"])'; }
+
+@test "gpu.sh tune rewrites vllm.env on the box: parser, seqs, quoted EXTRA_ARGS, token kept, 0600" {
+  printf '{"tool_parser": "qwen3_coder", "max_num_seqs": 12, "sampling": {"temperature": 0.2}}\n' > "$TMP/k.json"
+  capture_tune "$TMP/k.json"
+  printf 'VLLM_API_KEY=tok\nMODEL_REPO=%s\nTOOL_PARSER=qwen3_xml\nMAX_NUM_SEQS=8\nEXTRA_ARGS=\n' "$(default_repo)" > "$TMP/box/vllm.env"
+  PATH="$TMP/box/bin:$PATH" run bash "$TMP/box/cmd.sh"
+  [ "$status" -eq 0 ]
+  grep -qx 'TOOL_PARSER=qwen3_coder' "$TMP/box/vllm.env"
+  grep -qx 'MAX_NUM_SEQS=12' "$TMP/box/vllm.env"
+  grep -qx "EXTRA_ARGS='--override-generation-config {\"temperature\":0.2}'" "$TMP/box/vllm.env"
+  grep -qx 'VLLM_API_KEY=tok' "$TMP/box/vllm.env"
+  [ "$(grep -c '^EXTRA_ARGS=' "$TMP/box/vllm.env")" -eq 1 ]
+  [ "$(stat -f %Lp "$TMP/box/vllm.env" 2>/dev/null || stat -c %a "$TMP/box/vllm.env")" = 600 ]
+  grep -q 'compose up -d --force-recreate' "$TMP/box/docker.log"
+}
+
+@test "gpu.sh tune changes nothing on a box serving a non-default model" {
+  printf '{"tool_parser": "qwen3_coder", "max_num_seqs": 12, "sampling": {}}\n' > "$TMP/k.json"
+  capture_tune "$TMP/k.json"
+  printf 'MODEL_REPO=openai/gpt-oss-20b\nTOOL_PARSER=openai\nMAX_NUM_SEQS=16\nEXTRA_ARGS=\n' > "$TMP/box/vllm.env"
+  cp "$TMP/box/vllm.env" "$TMP/box/before"
+  PATH="$TMP/box/bin:$PATH" run bash "$TMP/box/cmd.sh"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"not serving the default model"* ]]
+  cmp "$TMP/box/before" "$TMP/box/vllm.env"
+  [ ! -f "$TMP/box/docker.log" ]
+}
+
+@test "overnight.sh start refuses without a key, with a loose key file, or a bad --until" {
+  HOME="$TMP" run scripts/overnight.sh start
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no gateway key"* ]]
+  printf 'not-a-real-key\n' > "$TMP/key"; chmod 644 "$TMP/key"
+  run scripts/overnight.sh start --key-file "$TMP/key"
+  [[ "$output" == *"must be mode 600"* ]]
+  run scripts/overnight.sh start --until 7am --key-file "$TMP/key"
+  [[ "$output" == *"--until wants HH:MM"* ]]
+}
+
+@test "overnight.sh admit copies only admitted tasks into dev, never held-out" {
+  export KIT_ROOT="$TMP/kit"
+  mkdir -p "$KIT_ROOT/scripts/lib" "$KIT_ROOT/evals/tasks/dev" "$KIT_ROOT/evals/tasks/heldout" "$KIT_ROOT/evals/runner" "$KIT_ROOT/evals/proposed/2026-09-25"
+  cp scripts/overnight.sh "$KIT_ROOT/scripts/"; cp scripts/lib/common.sh scripts/lib/overnight.py "$KIT_ROOT/scripts/lib/"
+  p="$KIT_ROOT/evals/proposed/2026-09-25"
+  printf '# family: migration\n' > "$p/migration-01.sh"; printf '# family: migration\n' > "$p/migration-02.sh"
+  printf '{"migration-01":{"rate":0.333,"verdict":"admit"},"migration-02":{"rate":1.0,"verdict":"reject: too easy"}}\n' > "$p/verdicts.json"
+  run "$KIT_ROOT/scripts/overnight.sh" admit 2026-09-25
+  [ "$status" -eq 0 ]
+  [ -f "$KIT_ROOT/evals/tasks/dev/migration-01.sh" ]
+  [ ! -e "$KIT_ROOT/evals/tasks/dev/migration-02.sh" ]
+  [ -z "$(ls "$KIT_ROOT/evals/tasks/heldout")" ]
+  grep -q 'tasks/dev/migration-01.sh' "$KIT_ROOT/evals/judge.sha256"
+  run "$KIT_ROOT/scripts/overnight.sh" admit 2026-09-25
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"already exists in the judge"* ]]
+}
+
+@test "overnight.sh status with no run says so" {
+  export KIT_ROOT="$TMP/kit2"
+  mkdir -p "$KIT_ROOT/scripts/lib" "$KIT_ROOT/evals/runs"
+  cp scripts/overnight.sh "$KIT_ROOT/scripts/"; cp scripts/lib/common.sh scripts/lib/overnight.py "$KIT_ROOT/scripts/lib/"
+  run "$KIT_ROOT/scripts/overnight.sh" status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"not running"* ]]
+}
+```
+
+Run: `bats tests/overnight.bats`
+Expected: 21 tests, 21 failures (`can't open file '.../scripts/lib/overnight.py'`, `scripts/overnight.sh: No such file or directory`, `evals/judge.sha256: No such file or directory`).
+
+- [ ] **Step 2: Write `scripts/lib/overnight.py`**
+
+```python
+#!/usr/bin/env python3
+"""Decisions and records for the overnight loop (Task 31). Called by scripts/overnight.sh and gpu.sh.
+
+  manifest <evals-dir>                      sha256 of every judge file (tasks/, runner/), sorted
+  deadline <HH:MM> [--now EPOCH]            the next HH:MM in America/Regina (CST), as an epoch
+  check-knobs <knobs.json>                  exit 0 if the knobs are inside their bounds
+  tune-args <knobs.json> <models.yaml>      repo, parser, seqs, base64 EXTRA_ARGS line for gpu.sh tune
+  validate <best-dir> <candidate-dir>       one idea per round: {"ok", "group" | "reason"}
+  score <round-dir>...                      pass rate per repetition, mean, spread, wall, tokens
+  decide <log.json> <score.json> <group> [--spilled]    keep | drop | void, with the margin used
+  streak <log.json>                         rounds since the last keep (void rounds do not count)
+  sanity <score.json>                       eval refresh: admit a proposed task at 20% to 80%
+  digest <round-dir> [--max-bytes N]        failed runs with the check output, for the researcher
+  render <log.json>                         the research log as markdown
+"""
+import base64
+import datetime as dt
+import hashlib
+import json
+import math
+import os
+import sys
+
+PARSERS = ("qwen3_xml", "qwen3_coder")
+SEQS = (4, 16)
+SAMPLING = {
+    "temperature": (0.0, 2.0),
+    "top_p": (0.01, 1.0),
+    "top_k": (-1, 200),
+    "repetition_penalty": (0.8, 1.5),
+}
+KNOB_GROUPS = ("tool_parser", "sampling", "max_num_seqs")
+FILE_GROUPS = {"CLAUDE.md": "claude_md", "append-system-prompt.md": "system_prompt"}
+LIMITS = {"CLAUDE.md": 8192, "append-system-prompt.md": 4096, "HYPOTHESIS.md": 2048, "skills": 32768}
+TPH_GAIN = 1.10  # a max_num_seqs change must raise tasks per hour by 10% to be kept
+
+
+def die(msg, code=1):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def load(path):
+    with open(path) as f:
+        return json.load(f)
+
+
+# ---- judge integrity ----------------------------------------------------------------------------
+
+def manifest(evals):
+    lines = []
+    for sub in ("runner", "tasks"):
+        for dirpath, dirnames, filenames in os.walk(os.path.join(evals, sub)):
+            dirnames.sort()
+            for name in sorted(filenames):
+                p = os.path.join(dirpath, name)
+                with open(p, "rb") as f:
+                    digest = hashlib.sha256(f.read()).hexdigest()
+                lines.append(f"{digest}  {os.path.relpath(p, evals)}")
+    return "\n".join(sorted(lines, key=lambda s: s.split("  ", 1)[1])) + "\n"
+
+
+def deadline(hhmm, now=None):
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("America/Regina")
+    try:
+        h, m = (int(x) for x in hhmm.split(":"))
+        assert 0 <= h < 24 and 0 <= m < 60
+    except (ValueError, AssertionError):
+        die(f"not a time: {hhmm} (want HH:MM)")
+    cur = dt.datetime.fromtimestamp(now if now is not None else dt.datetime.now().timestamp(), tz)
+    target = cur.replace(hour=h, minute=m, second=0, microsecond=0)
+    if target <= cur:
+        target += dt.timedelta(days=1)
+    return int(target.timestamp())
+
+
+# ---- knobs --------------------------------------------------------------------------------------
+
+def knob_errors(k):
+    errs = []
+    if not isinstance(k, dict) or set(k) != set(KNOB_GROUPS):
+        return [f"knobs.json must have exactly the keys {', '.join(KNOB_GROUPS)}"]
+    if k["tool_parser"] not in PARSERS:
+        errs.append(f"tool_parser must be one of {', '.join(PARSERS)}")
+    s = k["max_num_seqs"]
+    if isinstance(s, bool) or not isinstance(s, int) or not SEQS[0] <= s <= SEQS[1]:
+        errs.append(f"max_num_seqs must be an integer from {SEQS[0]} to {SEQS[1]}")
+    samp = k["sampling"]
+    if not isinstance(samp, dict):
+        errs.append("sampling must be an object")
+    else:
+        for key, val in samp.items():
+            if key not in SAMPLING:
+                errs.append(f"sampling.{key} is not a knob (allowed: {', '.join(SAMPLING)})")
+                continue
+            lo, hi = SAMPLING[key]
+            if isinstance(val, bool) or not isinstance(val, (int, float)) or not lo <= val <= hi:
+                errs.append(f"sampling.{key} must be a number from {lo} to {hi}")
+            elif key == "top_k" and (not isinstance(val, int) or val == 0):
+                errs.append("sampling.top_k must be -1 or an integer from 1 to 200")
+    return errs
+
+
+def tune_args(knobs_path, models_path):
+    import yaml
+    k = load(knobs_path)
+    errs = knob_errors(k)
+    if errs:
+        die("; ".join(errs))
+    models = yaml.safe_load(open(models_path))
+    m = models["models"][models["default"]]
+    extra = (m.get("extra_args") or "").strip()
+    if k["sampling"]:
+        cfg = json.dumps(k["sampling"], separators=(",", ":"), sort_keys=True)
+        extra = (extra + " --override-generation-config " + cfg).strip()
+    line = f"EXTRA_ARGS='{extra}'"
+    b64 = base64.b64encode(line.encode()).decode()
+    return "\t".join([m["repo"], k["tool_parser"], str(k["max_num_seqs"]), b64])
+
+
+# ---- one idea per round -------------------------------------------------------------------------
+
+def tree(root):
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d != ".git")
+        for name in filenames:
+            p = os.path.join(dirpath, name)
+            with open(p, "rb") as f:
+                out[os.path.relpath(p, root)] = f.read()
+    return out
+
+
+def validate(best_dir, cand_dir):
+    best, cand = tree(best_dir), tree(cand_dir)
+    changed = sorted(p for p in set(best) | set(cand) if best.get(p) != cand.get(p))
+    groups = set()
+    for p in changed:
+        if p in FILE_GROUPS:
+            groups.add(FILE_GROUPS[p])
+        elif p.startswith("skills/"):
+            groups.add("skills")
+        elif p not in ("knobs.json", "HYPOTHESIS.md"):
+            return {"ok": False, "reason": f"path not allowed: {p}"}
+    hyp = cand.get("HYPOTHESIS.md", b"").strip()
+    if not hyp or "HYPOTHESIS.md" not in changed:
+        return {"ok": False, "reason": "HYPOTHESIS.md must be rewritten for this round"}
+    for name in ("CLAUDE.md", "append-system-prompt.md", "HYPOTHESIS.md"):
+        if len(cand.get(name, b"")) > LIMITS[name]:
+            return {"ok": False, "reason": f"{name} is over {LIMITS[name]} bytes"}
+    skills = {p: v for p, v in cand.items() if p.startswith("skills/")}
+    if sum(len(v) for v in skills.values()) > LIMITS["skills"]:
+        return {"ok": False, "reason": f"skills/ is over {LIMITS['skills']} bytes"}
+    for d in sorted({p.split("/")[1] for p in skills if p.count("/") >= 2}):
+        md = cand.get(f"skills/{d}/SKILL.md", b"").decode(errors="replace")
+        head = md.split("---")[1] if md.startswith("---") and md.count("---") >= 2 else ""
+        if "name:" not in head or "description:" not in head:
+            return {"ok": False, "reason": f"skills/{d}/SKILL.md needs front matter with name: and description:"}
+    try:
+        kb, kc = json.loads(best.get("knobs.json", b"{}")), json.loads(cand.get("knobs.json", b"{}"))
+    except ValueError:
+        return {"ok": False, "reason": "knobs.json is not valid JSON"}
+    errs = knob_errors(kc)
+    if errs:
+        return {"ok": False, "reason": "; ".join(errs)}
+    groups |= {g for g in KNOB_GROUPS if kb.get(g) != kc.get(g)}
+    if len(groups) != 1:
+        found = ", ".join(sorted(groups)) or "nothing"
+        return {"ok": False, "reason": f"one idea per round: this changes {found}"}
+    return {"ok": True, "group": groups.pop()}
+
+
+# ---- scores and decisions -----------------------------------------------------------------------
+
+def score(round_dirs):
+    runs, offset = [], 0
+    for d in round_dirs:
+        top = 0
+        for name in sorted(os.listdir(d)):
+            p = os.path.join(d, name, "run.json")
+            if os.path.isfile(p):
+                r = load(p)
+                top = max(top, r["rep"])
+                r["rep"] += offset
+                runs.append(r)
+        offset += top
+    if not runs:
+        die("no run.json files under " + " ".join(round_dirs))
+    tasks = sorted({r["task"] for r in runs})
+    reps = sorted({r["rep"] for r in runs})
+    rates = [sum(1 for r in runs if r["rep"] == k and r["pass"]) / len(tasks) for k in reps]
+    mean = sum(rates) / len(rates)
+    sd = math.sqrt(sum((x - mean) ** 2 for x in rates) / (len(rates) - 1)) if len(rates) > 1 else 0.0
+    wall = sum(load(os.path.join(d, "round.json"))["wall_s"] for d in round_dirs if os.path.isfile(os.path.join(d, "round.json")))
+    errors = {}
+    for r in runs:
+        if r.get("error"):
+            errors[r["error"]] = errors.get(r["error"], 0) + 1
+    return {
+        "mean": round(mean, 4),
+        "sd": round(sd, 4),
+        "reps": [round(x, 4) for x in rates],
+        "n_tasks": len(tasks),
+        "runs": len(runs),
+        "per_task": {t: sum(1 for r in runs if r["task"] == t and r["pass"]) for t in tasks},
+        "wall_s": wall,
+        "tasks_per_hour": round(len(runs) / (wall / 3600), 2) if wall else None,
+        "tokens_in": sum(r.get("tokens_in", 0) for r in runs),
+        "tokens_out": sum(r.get("tokens_out", 0) for r in runs),
+        "errors": errors,
+    }
+
+
+def best_score(log):
+    for r in log["rounds"]:
+        if r["round"] == log["best"]:
+            return r["score"]
+    die(f"best round {log['best']} not in the log")
+
+
+def decide(log, cand, group, spilled=False):
+    if spilled:
+        return {"decision": "void", "reason": "some requests were served by Bedrock, not vLLM", "margin": None, "delta": None}
+    best = best_score(log)
+    se = 2 * math.sqrt(cand["sd"] ** 2 / len(cand["reps"]) + best["sd"] ** 2 / len(best["reps"]))
+    margin = round(max(log["noise"], se, 1 / cand["n_tasks"]), 4)
+    delta = round(cand["mean"] - best["mean"], 4)
+    if group == "max_num_seqs":
+        faster = (cand["tasks_per_hour"] or 0) >= TPH_GAIN * (best["tasks_per_hour"] or float("inf"))
+        keep = delta >= -margin and faster
+        why = f"throughput knob: {cand['tasks_per_hour']} vs {best['tasks_per_hour']} tasks/h, pass rate {delta:+.3f} (margin {margin})"
+    else:
+        keep = delta > margin
+        why = f"pass rate {delta:+.3f} vs best, needs more than +{margin}"
+    return {"decision": "keep" if keep else "drop", "reason": why, "margin": margin, "delta": delta}
+
+
+def streak(log):
+    n = 0
+    for r in reversed(log["rounds"]):
+        if r["decision"] in ("keep", "baseline"):
+            break
+        if r["decision"] != "void":
+            n += 1
+    return n
+
+
+def sanity(sc):
+    reps = len(sc["reps"])
+    out = {}
+    for task, passes in sc["per_task"].items():
+        rate = passes / reps
+        verdict = "admit" if 0.2 <= rate <= 0.8 else ("reject: too easy" if rate > 0.8 else "reject: too hard")
+        out[task] = {"rate": round(rate, 3), "verdict": verdict}
+    return out
+
+
+def digest(round_dir, max_bytes=3000):
+    parts = []
+    for name in sorted(os.listdir(round_dir)):
+        p = os.path.join(round_dir, name, "run.json")
+        if not os.path.isfile(p):
+            continue
+        r = load(p)
+        if r["pass"]:
+            continue
+        chk = ""
+        cp = os.path.join(round_dir, name, "check.txt")
+        if os.path.isfile(cp):
+            chk = open(cp, errors="replace").read()[-max_bytes:]
+        parts.append(f"## {r['task']} (repetition {r['rep']}): failed, {r.get('turns', '?')} turns, error {r.get('error') or 'none'}\n"
+                     f"Agent's final message (truncated): {str(r.get('result', ''))[:600]}\n"
+                     f"Check output (tail):\n{chk}\n")
+    return "\n".join(parts) or "No failures in this round.\n"
+
+
+# ---- the research log ---------------------------------------------------------------------------
+
+def pct(x):
+    return "n/a" if x is None else f"{100 * x:.1f}%"
+
+
+def fmt_score(s):
+    if not s:
+        return "not scored"
+    reps = ", ".join(pct(x) for x in s["reps"])
+    return f"{pct(s['mean'])} ± {pct(s['sd'])} (repetitions {reps})"
+
+
+def render(log):
+    out = [f"# Overnight loop, night of {log['date']}", ""]
+    out += [
+        f"- Backend `{log['backend']}`, model `{log['model']}`, judge checksum `{log['judge_sha'][:12]}`.",
+        f"- DEV: {log['dev_tasks']} tasks × {log['reps']} runs per round; held-out: {log['heldout_tasks']} tasks, scored only at the end.",
+        f"- Started {log.get('started', '?')}, ended {log.get('ended') or 'still running'}. Stop reason: {log.get('stop_reason') or 'n/a'}.",
+        f"- Noise floor (baseline run twice): {pct(log.get('noise'))}. A change is kept only when it beats the best DEV score by more than the larger of that, twice the combined standard error, and one task.",
+        f"- Plateau rule: {log['plateau_n']} rounds in a row without a keep. Eval refresh: {'on' if log['eval_refresh'] else 'off (first night: a clean ceiling measurement)'}.",
+        "",
+        "## Rounds",
+        "",
+        "| round | knob | hypothesis | DEV pass rate | Δ vs best | decision | wall | tokens in / out |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in log["rounds"]:
+        s = r.get("score") or {}
+        delta = r.get("delta")
+        hyp = (r.get("hypothesis") or "").splitlines()[0][:120].replace("|", "/") if r.get("hypothesis") else ""
+        out.append("| {} | {} | {} | {} | {} | {} | {} | {} / {} |".format(
+            r["round"], r.get("group", ""), hyp, fmt_score(s) if s else "not run",
+            "" if delta is None else f"{100 * delta:+.1f} pts", r["decision"] + (f": {r['note']}" if r.get("note") else ""),
+            f"{round((s.get('wall_s') or 0) / 60)} min" if s else "",
+            s.get("tokens_in", 0) + r.get("researcher_tokens_in", 0), s.get("tokens_out", 0) + r.get("researcher_tokens_out", 0)))
+    kept = [r for r in log["rounds"] if r["decision"] == "keep"]
+    dropped = {}
+    for r in log["rounds"]:
+        if r["decision"] in ("drop", "rejected", "void"):
+            dropped.setdefault(r.get("group") or "invalid", []).append(r["round"])
+    out += ["", "## Summary", "", "What helped:"]
+    out += [f"- {r['round']} ({r['group']}): {(r.get('hypothesis') or '').splitlines()[0][:200]} ({100 * r['delta']:+.1f} pts)" for r in kept] or ["- nothing beat the noise floor"]
+    out += ["", "What didn't:"]
+    out += [f"- {g}: {len(rs)} round(s) ({', '.join(rs)})" for g, rs in sorted(dropped.items())] or ["- every tried change was kept"]
+    last_keep = kept[-1]["round"] if kept else "baseline"
+    out += ["", f"Plateau: {'reached at ' + log['plateau_at'] if log.get('plateau_at') else 'not reached'}; the best harness is `{log['best']}` (last gain: {last_keep})."]
+    h = log.get("heldout") or {}
+    out += ["", "## Held-out (scored once, at the end)", ""]
+    out += [f"- Baseline: {fmt_score(h.get('baseline'))}", f"- Best (`{log['best']}`): {fmt_score(h.get('best') or (h.get('baseline') if log['best'] == 'baseline' else None))}"]
+    base_dev = next((r["score"] for r in log["rounds"] if r["round"] == "baseline"), None)
+    if h.get("baseline") and h.get("best") and base_dev:
+        dev_gain = best_score(log)["mean"] - base_dev["mean"]
+        held_gain = h["best"]["mean"] - h["baseline"]["mean"]
+        out.append(f"- DEV gain {100 * dev_gain:+.1f} pts, held-out gain {100 * held_gain:+.1f} pts: "
+                   + ("the gain carries over." if held_gain >= dev_gain / 2 else "most of the DEV gain did not carry over (overfitting to DEV)."))
+    ref = log.get("eval_refresh_log") or []
+    if log["eval_refresh"] or ref:
+        out += ["", "## Eval refresh (proposed task families)", ""]
+        out += ["| proposed task | self-test | baseline pass rate | verdict |", "|---|---|---|---|"]
+        out += [f"| {e['task']} | {e['selftest']} | {pct(e.get('rate'))} | {e['verdict']} |" for e in ref] or ["| (none proposed) | | | |"]
+        out.append("")
+        out.append("Admitted tasks join the DEV set only after `scripts/overnight.sh admit <date>` and a reviewed PR; tonight's judge never changed.")
+    if log.get("best_diff"):
+        out += ["", "## Adopting the best harness", "", "Files that differ from the baseline:", ""]
+        out += [f"- `{p}`" for p in log["best_diff"]]
+    return "\n".join(out) + "\n"
+
+
+def main(argv):
+    if not argv:
+        die(__doc__)
+    cmd, args = argv[0], argv[1:]
+    if cmd == "manifest":
+        sys.stdout.write(manifest(args[0]))
+    elif cmd == "deadline":
+        now = float(args[2]) if len(args) > 2 and args[1] == "--now" else None
+        print(deadline(args[0], now))
+    elif cmd == "check-knobs":
+        errs = knob_errors(load(args[0]))
+        if errs:
+            die("; ".join(errs))
+    elif cmd == "tune-args":
+        print(tune_args(args[0], args[1]))
+    elif cmd == "validate":
+        res = validate(args[0], args[1])
+        print(json.dumps(res))
+        sys.exit(0 if res["ok"] else 1)
+    elif cmd == "score":
+        print(json.dumps(score(args)))
+    elif cmd == "decide":
+        print(json.dumps(decide(load(args[0]), load(args[1]), args[2], "--spilled" in args)))
+    elif cmd == "streak":
+        print(streak(load(args[0])))
+    elif cmd == "sanity":
+        print(json.dumps(sanity(load(args[0]))))
+    elif cmd == "digest":
+        mb = int(args[2]) if len(args) > 2 and args[1] == "--max-bytes" else 3000
+        sys.stdout.write(digest(args[0], mb))
+    elif cmd == "render":
+        sys.stdout.write(render(load(args[0])))
+    else:
+        die(__doc__)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+```
+
+- [ ] **Step 3: Add `tune` to `scripts/gpu.sh`**
+
+Three edits. The header, after the `model` line:
+
+```bash
+# Usage: scripts/gpu.sh start|stop|status|logs|weights|model <name>|tune <knobs.json>
+```
+
+```bash
+#   tune     restart vLLM on the default model with the tool parser, max_num_seqs, and sampling
+#            defaults from a knobs.json (the overnight loop's scheduler, Task 31; bounds in
+#            scripts/lib/overnight.py). `model <default>` puts models.yaml's settings back.
+```
+
+After the `if [[ "$action" == "model" ]]; then ... fi` block (so bad knobs die before any AWS call):
+
+```bash
+if [[ "$action" == "tune" ]]; then
+  knobs="${2:?usage: scripts/gpu.sh tune <knobs.json>}"
+  [[ -f "$knobs" ]] || die "no such file: $knobs"
+  py="$KIT_ROOT/.venv/bin/python"; [[ -x "$py" ]] || py=python3
+  line="$("$py" "$KIT_ROOT/scripts/lib/overnight.py" tune-args "$knobs" "$KIT_ROOT/infra/recipes/gpu-box/models.yaml")" \
+    || die "knobs rejected: $knobs"
+  IFS=$'\t' read -r repo parser seqs extra_b64 <<< "$line"
+  [[ "$repo" =~ ^[A-Za-z0-9._/-]+$ && "$parser" =~ ^[a-z0-9_]+$ && "$seqs" =~ ^[0-9]+$ && "$extra_b64" =~ ^[A-Za-z0-9+/=]+$ ]] \
+    || die "tune arguments have unexpected characters"
+fi
+```
+
+And a case arm before `*)`, whose usage message gains `|tune <knobs.json>`:
+
+```bash
+  tune)
+    [[ "$state" == "running" ]] || die "the GPU box is $state; scripts/gpu.sh start first"
+    # The EXTRA_ARGS line holds JSON, so it travels base64-encoded and is written single-quoted
+    # (compose reads single-quoted env_file values literally); umask keeps vllm.env at 0600.
+    run_on_box "set -e; umask 077; f=/etc/xenia/vllm.env; grep -qx 'MODEL_REPO=$repo' \$f || { echo 'tune: the box is not serving the default model; run scripts/gpu.sh model <default> first'; exit 3; }; grep -v '^EXTRA_ARGS=' \$f | sed -e 's|^TOOL_PARSER=.*|TOOL_PARSER=$parser|' -e 's|^MAX_NUM_SEQS=.*|MAX_NUM_SEQS=$seqs|' > \$f.new; echo $extra_b64 | base64 -d >> \$f.new; echo >> \$f.new; mv \$f.new \$f; cd $recipe_on_box && docker compose up -d --force-recreate; grep -E '^(TOOL_PARSER|MAX_NUM_SEQS|EXTRA_ARGS)=' \$f"
+    log "vLLM restarting with $parser, max_num_seqs $seqs; healthy in about 5 minutes (the weights are on the volume)"
+    ;;
+  *)
+    die "usage: scripts/gpu.sh start|stop|status|logs|weights|model <name>|tune <knobs.json>"
+```
+
+No compose change: the compose command already expands `$$EXTRA_ARGS` unquoted inside `bash -c`, and the compact JSON has no spaces or glob characters, so it arrives as one argument.
+
+Run: `bats tests/overnight.bats tests/gpu.bats`
+Expected: every `overnight.py` and `gpu.sh` test passes (`tests/gpu.bats` unchanged); the `overnight.sh` tests and the committed-manifest test still fail (no script, no manifest yet).
+
+- [ ] **Step 4: Write the judge runner and the self-test**
+
+`evals/runner/lib.sh`:
+
+```bash
+# Helpers for task files, sourced before each one by judge.sh. Not executable on its own.
+
+# unchanged <dir> <path>...: fail unless each path in <dir> is byte-for-byte the fixture's.
+unchanged() {
+  local dir="$1" fresh p
+  shift
+  fresh="$(mktemp -d)"
+  (cd "$fresh" && fixture "$fresh")
+  for p in "$@"; do
+    cmp -s "$fresh/$p" "$dir/$p" || { echo "changed or missing: $p"; rm -rf "$fresh"; return 1; }
+  done
+  rm -rf "$fresh"
+}
+
+# answer_is <dir> <expected>: ANSWER.txt equals <expected>, ignoring case, surrounding blank space,
+# and a trailing full stop.
+answer_is() {
+  local got want
+  [[ -f "$1/ANSWER.txt" ]] || { echo "no ANSWER.txt"; return 1; }
+  got="$(tr -d '\r' < "$1/ANSWER.txt" | sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]*//' -e 's/\.$//' | grep -v '^$' | tr '[:upper:]' '[:lower:]')" || true
+  want="$(printf '%s\n' "$2" | tr '[:upper:]' '[:lower:]')"
+  [[ "$got" == "$want" ]] || { echo "ANSWER.txt: expected '$2', got '$got'"; return 1; }
+}
+```
+
+`evals/runner/judge.sh`:
+
+```bash
+#!/usr/bin/env bash
+# The judge for one task file. Runs in a --network none container during the overnight loop (the
+# task's check executes code the agent wrote), and on the host for the self-test in `make check`.
+# Usage:
+#   judge.sh prompt   <task-file>          print the task's prompt
+#   judge.sh fixture  <task-file> <dir>    write the task's starting repo into the empty <dir>, commit it
+#   judge.sh check    <task-file> <dir>    check a finished run on a scratch copy of <dir>; exit 0 = pass
+#   judge.sh selftest <task-file>          the untouched fixture must fail, the reference solution must pass
+#
+# The bash -c bodies are single-quoted on purpose: $1.. are the inner shell's arguments.
+# shellcheck disable=SC2016
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+action="${1:-}"
+task="${2:-}"
+[[ -n "$action" && -f "$task" ]] || { echo "usage: judge.sh prompt|fixture|check|selftest <task-file> [dir]" >&2; exit 2; }
+task="$(cd "$(dirname "$task")" && pwd)/$(basename "$task")"
+# Run dirs are bind mounts whose owner can differ from the container user; git must not refuse them.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*'
+limit=()
+command -v timeout >/dev/null 2>&1 && limit=(timeout 300)
+
+in_task() { # in_task <function> <dir>: run one of the task's functions in <dir>, in a fresh bash
+  (cd "$2" && "${limit[@]}" bash -c 'source "$1"; source "$2"; "$3" "$4"' _ "$here/lib.sh" "$task" "$1" "$2")
+}
+
+case "$action" in
+  prompt)
+    bash -c 'source "$1"; printf "%s\n" "$PROMPT"' _ "$task"
+    ;;
+  fixture)
+    dir="${3:?judge.sh fixture <task-file> <dir>}"
+    mkdir -p "$dir"
+    in_task fixture "$dir"
+    git -C "$dir" init -q
+    git -C "$dir" add -A
+    git -C "$dir" -c user.name=fixture -c user.email=fixture commit -qm fixture
+    if bash -c 'source "$1"; declare -F after_commit >/dev/null' _ "$task"; then
+      in_task after_commit "$dir"
+    fi
+    ;;
+  check)
+    src="${3:?judge.sh check <task-file> <dir>}"
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work" "$work.out"' EXIT
+    cp -a "$src/." "$work/"
+    set +e
+    in_task check "$work" > "$work.out" 2>&1
+    rc=$?
+    set -e
+    tail -n 30 "$work.out"
+    exit "$rc"
+    ;;
+  selftest)
+    prompt="$(bash -c 'source "$1"; printf "%s" "$PROMPT"' _ "$task")"
+    [[ "$prompt" == "Agent: "* ]] || { echo "FAIL $task: PROMPT must start with 'Agent: '"; exit 1; }
+    grep -Eq '^# family: [a-z]+$' "$task" || { echo "FAIL $task: no '# family: <name>' line"; exit 1; }
+    a="$(mktemp -d)"; b="$(mktemp -d)"
+    trap 'rm -rf "$a" "$b"' EXIT
+    "$0" fixture "$task" "$a"
+    if "$0" check "$task" "$a" >/dev/null 2>&1; then
+      echo "FAIL $task: the untouched fixture passes its check"; exit 1
+    fi
+    "$0" fixture "$task" "$b"
+    in_task solve "$b"
+    if ! out="$("$0" check "$task" "$b" 2>&1)"; then
+      echo "FAIL $task: the reference solution fails its check"; printf '%s\n' "$out"; exit 1
+    fi
+    echo "ok $(basename "$(dirname "$task")")/$(basename "$task")"
+    ;;
+  *)
+    echo "usage: judge.sh prompt|fixture|check|selftest <task-file> [dir]" >&2; exit 2
+    ;;
+esac
+```
+
+`evals/selftest.sh`:
+
+```bash
+#!/usr/bin/env bash
+# Usage: evals/selftest.sh [task-file...]
+# Checks the frozen judge: every task's untouched fixture fails its check and its reference solution
+# passes; the DEV and held-out splits have the agreed sizes and cover the same six families; and the
+# committed checksum manifest (evals/judge.sha256) matches the files. With arguments, self-tests only
+# those files (used on proposed tasks, inside a --network none container). Run by `make check`.
+set -euo pipefail
+root="$(cd "$(dirname "$0")" && pwd)"
+judge="$root/runner/judge.sh"
+fail=0
+
+if [[ $# -gt 0 ]]; then
+  for t in "$@"; do "$judge" selftest "$t" || fail=1; done
+  exit "$fail"
+fi
+
+for t in "$root"/tasks/dev/*.sh "$root"/tasks/heldout/*.sh; do
+  "$judge" selftest "$t" || fail=1
+done
+
+families() { grep -h '^# family: ' "$root/tasks/$1"/*.sh | sort -u | sed 's/^# family: //' | tr '\n' ' '; }
+dev_n="$(find "$root/tasks/dev" -name '*.sh' | wc -l | tr -d ' ')"
+held_n="$(find "$root/tasks/heldout" -name '*.sh' | wc -l | tr -d ' ')"
+# DEV may grow (overnight.sh admit adds reviewed tasks); held-out stays at twelve, two per family.
+[[ "$dev_n" -ge 18 && "$held_n" == 12 ]] || { echo "FAIL split sizes: dev $dev_n (want 18 or more), held-out $held_n (want 12)"; fail=1; }
+[[ "$(families heldout | wc -w | tr -d ' ')" == 6 ]] || { echo "FAIL held-out families: [$(families heldout)] (want six)"; fail=1; }
+for f in $(families heldout); do
+  [[ " $(families dev) " == *" $f "* ]] || { echo "FAIL family $f is held-out only"; fail=1; }
+done
+dups="$( (cd "$root/tasks" && ls dev heldout) | grep '\.sh$' | sort | uniq -d)"
+[[ -z "$dups" ]] || { echo "FAIL a task name appears in both splits: $dups"; fail=1; }
+
+if ! diff <(python3 "$root/../scripts/lib/overnight.py" manifest "$root") "$root/judge.sha256" >/dev/null; then
+  echo "FAIL evals/judge.sha256 is stale: run python3 scripts/lib/overnight.py manifest evals > evals/judge.sha256 and commit it"
+  fail=1
+fi
+
+[[ "$fail" == 0 ]] && echo "evals selftest: OK ($dev_n dev, $held_n held-out)"
+exit "$fail"
+```
+
+Run: `chmod +x evals/runner/judge.sh evals/selftest.sh && evals/selftest.sh`
+Expected: fails with `FAIL split sizes: dev 0 ...` (no tasks yet).
+
+- [ ] **Step 5: Write the 18 DEV tasks**
+
+Each is multi-step on purpose: read code, change it, run something, and get a check that looks at results, not wording. Tests the agent must not edit are pinned with `unchanged`; `answer` tasks write `ANSWER.txt`.
+
+`evals/tasks/dev/answer-01.sh`:
+
+```bash
+# family: answer
+PROMPT='Agent: when main.py runs, which function actually reads the configuration file, and in which file is that function defined? Write the answer to ANSWER.txt as one line: the function name, a space, and the file path relative to the repo root (for example: parse_args cli/args.py). Do not change any code.'
+
+fixture() {
+  mkdir -p app utils
+  cat > main.py <<'EOF'
+from app.loader import get_config
+from utils.io import read_text
+
+
+def main():
+    cfg = get_config("settings.ini")
+    banner = read_text("banner.txt")
+    print(banner, cfg["name"])
+
+
+if __name__ == "__main__":
+    main()
+EOF
+  : > app/__init__.py
+  : > utils/__init__.py
+  cat > app/loader.py <<'EOF'
+# Kept for backwards compatibility: get_config used to live here.
+from app.settings import load_settings as get_config  # noqa: F401
+EOF
+  cat > app/settings.py <<'EOF'
+import configparser
+
+
+def load_settings(path):
+    parser = configparser.ConfigParser()
+    parser.read(path)
+    return dict(parser["app"])
+EOF
+  cat > app/config.py <<'EOF'
+def load_config(path):
+    """Old loader, no longer called anywhere."""
+    raise NotImplementedError
+EOF
+  cat > utils/io.py <<'EOF'
+def read_text(path):
+    with open(path) as f:
+        return f.read().strip()
+EOF
+  printf '[app]\nname = demo\n' > settings.ini
+  printf 'hello\n' > banner.txt
+}
+
+check() {
+  unchanged "$1" main.py app/loader.py app/settings.py || return 1
+  python3 - <<'EOF'
+import re
+words = open("ANSWER.txt").read().split()
+assert len(words) == 2, f"expected two words, got {words}"
+name, path = words[0].strip("`"), re.sub(r"^\./", "", words[1].strip("`"))
+assert (name, path) == ("load_settings", "app/settings.py"), (name, path)
+EOF
+}
+
+solve() {
+  printf 'load_settings app/settings.py\n' > ANSWER.txt
+}
+```
+
+`evals/tasks/dev/answer-02.sh`:
+
+```bash
+# family: answer
+PROMPT='Agent: run the test suite in this repo (python3 -m unittest) and write the names of the failing test methods to ANSWER.txt, one per line, sorted alphabetically. Do not fix anything.'
+
+fixture() {
+  cat > mathx.py <<'EOF'
+def double(x):
+    return x * 2
+
+
+def divide_by_two(x):
+    return x // 2
+
+
+def power(a, b):
+    return a * b
+
+
+def negate(x):
+    return -x
+EOF
+  cat > test_mathx.py <<'EOF'
+import unittest
+
+import mathx
+
+
+class MathTest(unittest.TestCase):
+    def test_double(self):
+        self.assertEqual(mathx.double(4), 8)
+
+    def test_double_negative(self):
+        self.assertEqual(mathx.double(-1), -2)
+
+    def test_divide_by_two(self):
+        self.assertEqual(mathx.divide_by_two(5), 2.5)
+
+    def test_power(self):
+        self.assertEqual(mathx.power(2, 3), 8)
+
+    def test_power_of_one(self):
+        self.assertEqual(mathx.power(1, 1), 1)
+
+    def test_negate(self):
+        self.assertEqual(mathx.negate(3), -3)
+
+    def test_negate_zero(self):
+        self.assertEqual(mathx.negate(0), 0)
+EOF
+}
+
+check() {
+  unchanged "$1" mathx.py test_mathx.py || return 1
+  answer_is "$1" $'test_divide_by_two\ntest_power'
+}
+
+solve() {
+  printf 'test_divide_by_two\ntest_power\n' > ANSWER.txt
+}
+```
+
+`evals/tasks/dev/answer-03.sh`:
+
+```bash
+# family: answer
+PROMPT='Agent: when the PORT environment variable is not set, which port does this server listen on? Work it out from the code and config in this repo, and write only the number to ANSWER.txt.'
+
+fixture() {
+  cat > config.js <<'EOF'
+const fs = require('fs');
+const path = require('path');
+
+const base = require('./settings.json');
+const localPath = path.join(__dirname, 'settings.local.json');
+const local = fs.existsSync(localPath) ? JSON.parse(fs.readFileSync(localPath, 'utf8')) : {};
+const server = { ...base.server, ...(local.server || {}) };
+
+function port() {
+  return Number(process.env.PORT || server.port || 3000);
+}
+
+module.exports = { port };
+EOF
+  cat > settings.json <<'EOF'
+{ "server": { "host": "localhost", "port": 8081 }, "db": { "port": 5432 } }
+EOF
+  cat > settings.local.json <<'EOF'
+{ "server": { "port": 9090 } }
+EOF
+  cat > server.js <<'EOF'
+const http = require('http');
+const { port } = require('./config');
+
+http.createServer((req, res) => res.end('ok')).listen(port());
+EOF
+  printf '# demo\n\nThe server listens on port 8081 by default.\n' > README.md
+}
+
+check() {
+  unchanged "$1" config.js settings.json settings.local.json || return 1
+  answer_is "$1" 9090
+}
+
+solve() {
+  printf '9090\n' > ANSWER.txt
+}
+```
+
+`evals/tasks/dev/bugfix-01.sh`:
+
+```bash
+# family: bugfix
+PROMPT='Agent: the tests in this repo fail. Find the bug in stats.py, fix it, and run the tests (python3 -m unittest) until they pass. Do not edit test_stats.py.'
+
+fixture() {
+  cat > stats.py <<'EOF'
+def mean(xs):
+    return sum(xs) / len(xs)
+
+
+def median(xs):
+    s = sorted(xs)
+    return s[len(s) // 2]
+EOF
+  cat > test_stats.py <<'EOF'
+import unittest
+
+from stats import mean, median
+
+
+class StatsTest(unittest.TestCase):
+    def test_mean(self):
+        self.assertEqual(mean([1, 2, 3]), 2)
+
+    def test_median_odd(self):
+        self.assertEqual(median([3, 1, 2]), 2)
+
+    def test_median_even(self):
+        self.assertEqual(median([4, 1, 3, 2]), 2.5)
+EOF
+}
+
+check() {
+  unchanged "$1" test_stats.py || return 1
+  python3 -m unittest -q || return 1
+  python3 - <<'EOF'
+from stats import median
+assert median([5]) == 5
+assert median([10, 20]) == 15
+assert median([7, 1, 5, 3, 9, 11]) == 6
+EOF
+}
+
+solve() {
+  cat > stats.py <<'EOF'
+def mean(xs):
+    return sum(xs) / len(xs)
+
+
+def median(xs):
+    s = sorted(xs)
+    mid = len(s) // 2
+    if len(s) % 2:
+        return s[mid]
+    return (s[mid - 1] + s[mid]) / 2
+EOF
+}
+```
+
+`evals/tasks/dev/bugfix-02.sh`:
+
+```bash
+# family: bugfix
+PROMPT='Agent: slugify.test.js fails. Fix slugify.js so the tests pass (node --test slugify.test.js), without editing the test file.'
+
+fixture() {
+  cat > slugify.js <<'EOF'
+function slugify(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]/g, '-');
+}
+
+module.exports = { slugify };
+EOF
+  cat > slugify.test.js <<'EOF'
+const test = require('node:test');
+const assert = require('node:assert');
+const { slugify } = require('./slugify');
+
+test('two words', () => assert.strictEqual(slugify('Hello World'), 'hello-world'));
+test('punctuation and repeated spaces collapse to one dash', () =>
+  assert.strictEqual(slugify('Hello,  World!'), 'hello-world'));
+EOF
+}
+
+check() {
+  unchanged "$1" slugify.test.js || return 1
+  node --test slugify.test.js || return 1
+  node -e '
+const assert = require("node:assert");
+const { slugify } = require("./slugify");
+assert.strictEqual(slugify("  --Already--Slugged--  "), "already-slugged");
+assert.strictEqual(slugify("C++ & Rust"), "c-rust");
+assert.strictEqual(slugify("v2 release"), "v2-release");
+'
+}
+
+solve() {
+  cat > slugify.js <<'EOF'
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+module.exports = { slugify };
+EOF
+}
+```
+
+`evals/tasks/dev/bugfix-03.sh`:
+
+```bash
+# family: bugfix
+PROMPT='Agent: pages.py has off-by-one bugs: the tests in test_pages.py fail. Fix pages.py so python3 -m unittest passes, without editing the tests.'
+
+fixture() {
+  cat > pages.py <<'EOF'
+def paginate(items, page, size):
+    """Return the items on a 1-based page."""
+    start = page * size
+    return items[start:start + size]
+
+
+def page_count(n, size):
+    """How many pages n items fill."""
+    return n // size
+EOF
+  cat > test_pages.py <<'EOF'
+import unittest
+
+from pages import page_count, paginate
+
+
+class PagesTest(unittest.TestCase):
+    def test_first_page(self):
+        self.assertEqual(paginate(list(range(10)), 1, 3), [0, 1, 2])
+
+    def test_last_page(self):
+        self.assertEqual(paginate(list(range(10)), 4, 3), [9])
+
+    def test_page_count(self):
+        self.assertEqual(page_count(10, 3), 4)
+EOF
+}
+
+check() {
+  unchanged "$1" test_pages.py || return 1
+  python3 -m unittest -q || return 1
+  python3 - <<'EOF'
+from pages import page_count, paginate
+assert page_count(9, 3) == 3
+assert page_count(0, 5) == 0
+assert page_count(1, 5) == 1
+assert paginate([], 1, 5) == []
+assert paginate(list(range(5)), 2, 5) == []
+assert paginate(list(range(6)), 2, 3) == [3, 4, 5]
+EOF
+}
+
+solve() {
+  cat > pages.py <<'EOF'
+def paginate(items, page, size):
+    """Return the items on a 1-based page."""
+    start = (page - 1) * size
+    return items[start:start + size]
+
+
+def page_count(n, size):
+    """How many pages n items fill."""
+    return (n + size - 1) // size
+EOF
+}
+```
+
+`evals/tasks/dev/feature-01.sh`:
+
+```bash
+# family: feature
+PROMPT='Agent: add a --reverse flag to sortlines.py that prints the lines in reverse sorted order (without the flag, behaviour stays the same). Add a test for it to test_sortlines.py and run python3 -m unittest.'
+
+fixture() {
+  cat > sortlines.py <<'EOF'
+import sys
+
+
+def sort_lines(lines):
+    return sorted(lines)
+
+
+def main(argv):
+    lines = sys.stdin.read().splitlines()
+    for line in sort_lines(lines):
+        print(line)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+EOF
+  cat > test_sortlines.py <<'EOF'
+import unittest
+
+from sortlines import sort_lines
+
+
+class SortTest(unittest.TestCase):
+    def test_sorts(self):
+        self.assertEqual(sort_lines(["b", "a"]), ["a", "b"])
+EOF
+}
+
+check() {
+  python3 -m unittest -q || return 1
+  [[ "$(grep -c 'def test_' test_sortlines.py)" -ge 2 ]] || { echo "no new test"; return 1; }
+  grep -q reverse test_sortlines.py || { echo "the new test does not mention reverse"; return 1; }
+  [[ "$(printf 'b\na\nc\n' | python3 sortlines.py --reverse)" == $'c\nb\na' ]] || { echo "--reverse output wrong"; return 1; }
+  [[ "$(printf 'b\na\nc\n' | python3 sortlines.py)" == $'a\nb\nc' ]] || { echo "default output changed"; return 1; }
+}
+
+solve() {
+  cat > sortlines.py <<'EOF'
+import sys
+
+
+def sort_lines(lines, reverse=False):
+    return sorted(lines, reverse=reverse)
+
+
+def main(argv):
+    lines = sys.stdin.read().splitlines()
+    for line in sort_lines(lines, reverse="--reverse" in argv):
+        print(line)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+EOF
+  cat >> test_sortlines.py <<'EOF'
+
+    def test_reverse(self):
+        self.assertEqual(sort_lines(["a", "c", "b"], reverse=True), ["c", "b", "a"])
+EOF
+}
+```
+
+`evals/tasks/dev/feature-02.sh`:
+
+```bash
+# family: feature
+PROMPT='Agent: add a subtract(a, b) function to calc.js and export it next to add and multiply. Add a test for it in calc.test.js and run node --test calc.test.js.'
+
+fixture() {
+  cat > calc.js <<'EOF'
+function add(a, b) {
+  return a + b;
+}
+
+function multiply(a, b) {
+  return a * b;
+}
+
+module.exports = { add, multiply };
+EOF
+  cat > calc.test.js <<'EOF'
+const test = require('node:test');
+const assert = require('node:assert');
+const { add, multiply } = require('./calc');
+
+test('add', () => assert.strictEqual(add(2, 3), 5));
+test('multiply', () => assert.strictEqual(multiply(2, 3), 6));
+EOF
+}
+
+check() {
+  node --test calc.test.js || return 1
+  grep -q subtract calc.test.js || { echo "no subtract test"; return 1; }
+  node -e '
+const assert = require("node:assert");
+const c = require("./calc");
+assert.strictEqual(c.subtract(5, 3), 2);
+assert.strictEqual(c.subtract(0, 4), -4);
+assert.strictEqual(c.add(1, 1), 2);
+assert.strictEqual(c.multiply(3, 3), 9);
+'
+}
+
+solve() {
+  cat > calc.js <<'EOF'
+function add(a, b) {
+  return a + b;
+}
+
+function subtract(a, b) {
+  return a - b;
+}
+
+function multiply(a, b) {
+  return a * b;
+}
+
+module.exports = { add, subtract, multiply };
+EOF
+  cat >> calc.test.js <<'EOF'
+test('subtract', () => assert.strictEqual(require('./calc').subtract(5, 7), -2));
+EOF
+}
+```
+
+`evals/tasks/dev/feature-03.sh`:
+
+```bash
+# family: feature
+PROMPT='Agent: add a remove(name, qty=1) method to Inventory in inventory.py. It lowers the count, deletes the item once its count reaches zero, and raises ValueError (changing nothing) when there are not enough of the item. Add tests for all three behaviours to test_inventory.py and run python3 -m unittest.'
+
+fixture() {
+  cat > inventory.py <<'EOF'
+class Inventory:
+    def __init__(self):
+        self.items = {}
+
+    def add(self, name, qty=1):
+        if qty <= 0:
+            raise ValueError("qty must be positive")
+        self.items[name] = self.items.get(name, 0) + qty
+
+    def count(self, name):
+        return self.items.get(name, 0)
+EOF
+  cat > test_inventory.py <<'EOF'
+import unittest
+
+from inventory import Inventory
+
+
+class InventoryTest(unittest.TestCase):
+    def test_add(self):
+        inv = Inventory()
+        inv.add("bolt", 3)
+        self.assertEqual(inv.count("bolt"), 3)
+
+    def test_add_rejects_zero(self):
+        with self.assertRaises(ValueError):
+            Inventory().add("bolt", 0)
+EOF
+}
+
+check() {
+  python3 -m unittest -q || return 1
+  [[ "$(grep -c 'def test_' test_inventory.py)" -ge 5 ]] || { echo "fewer than three new tests"; return 1; }
+  grep -q 'remove' test_inventory.py || { echo "the tests do not call remove"; return 1; }
+  python3 - <<'EOF'
+from inventory import Inventory
+inv = Inventory()
+inv.add("nut", 5)
+inv.remove("nut", 2)
+assert inv.count("nut") == 3
+inv.remove("nut")
+assert inv.count("nut") == 2
+inv.remove("nut", 2)
+assert "nut" not in inv.items, "an item at zero must be deleted"
+inv.add("pin", 1)
+try:
+    inv.remove("pin", 2)
+    raise SystemExit("removing too many must raise ValueError")
+except ValueError:
+    pass
+assert inv.count("pin") == 1, "a failed remove must change nothing"
+try:
+    inv.remove("ghost")
+    raise SystemExit("removing an unknown item must raise ValueError")
+except ValueError:
+    pass
+EOF
+}
+
+solve() {
+  cat >> inventory.py <<'EOF'
+
+    def remove(self, name, qty=1):
+        have = self.items.get(name, 0)
+        if qty > have:
+            raise ValueError(f"only {have} {name}")
+        if have == qty:
+            del self.items[name]
+        else:
+            self.items[name] = have - qty
+EOF
+  cat >> test_inventory.py <<'EOF'
+
+    def test_remove_lowers(self):
+        inv = Inventory()
+        inv.add("bolt", 3)
+        inv.remove("bolt", 2)
+        self.assertEqual(inv.count("bolt"), 1)
+
+    def test_remove_to_zero_deletes(self):
+        inv = Inventory()
+        inv.add("bolt", 1)
+        inv.remove("bolt")
+        self.assertNotIn("bolt", inv.items)
+
+    def test_remove_too_many_raises(self):
+        inv = Inventory()
+        inv.add("bolt", 1)
+        with self.assertRaises(ValueError):
+            inv.remove("bolt", 2)
+EOF
+}
+```
+
+`evals/tasks/dev/multifile-01.sh`:
+
+```bash
+# family: multifile
+PROMPT='Agent: add a currency field to Order in models.py (a three-letter code, default "CAD"). Include it in serialize.to_dict() under the key "currency", and show it after the amount in report.line(), like "Order 1: 9.50 CAD". Update test_orders.py to match and run python3 -m unittest.'
+
+fixture() {
+  cat > models.py <<'EOF'
+from dataclasses import dataclass
+
+
+@dataclass
+class Order:
+    id: int
+    amount: float
+EOF
+  cat > serialize.py <<'EOF'
+def to_dict(order):
+    return {"id": order.id, "amount": order.amount}
+EOF
+  cat > report.py <<'EOF'
+def line(order):
+    return f"Order {order.id}: {order.amount:.2f}"
+EOF
+  cat > test_orders.py <<'EOF'
+import unittest
+
+from models import Order
+from report import line
+from serialize import to_dict
+
+
+class OrderTest(unittest.TestCase):
+    def test_to_dict(self):
+        self.assertEqual(to_dict(Order(1, 9.5)), {"id": 1, "amount": 9.5})
+
+    def test_line(self):
+        self.assertEqual(line(Order(1, 9.5)), "Order 1: 9.50")
+EOF
+}
+
+check() {
+  python3 -m unittest -q || return 1
+  python3 - <<'EOF'
+from models import Order
+from report import line
+from serialize import to_dict
+assert Order(2, 3.0).currency == "CAD"
+assert to_dict(Order(2, 3.0, "USD")) == {"id": 2, "amount": 3.0, "currency": "USD"}
+assert line(Order(2, 3.0, "USD")) == "Order 2: 3.00 USD"
+assert line(Order(1, 9.5)) == "Order 1: 9.50 CAD"
+EOF
+}
+
+solve() {
+  cat > models.py <<'EOF'
+from dataclasses import dataclass
+
+
+@dataclass
+class Order:
+    id: int
+    amount: float
+    currency: str = "CAD"
+EOF
+  cat > serialize.py <<'EOF'
+def to_dict(order):
+    return {"id": order.id, "amount": order.amount, "currency": order.currency}
+EOF
+  cat > report.py <<'EOF'
+def line(order):
+    return f"Order {order.id}: {order.amount:.2f} {order.currency}"
+EOF
+  sed -e 's/{"id": 1, "amount": 9.5}/{"id": 1, "amount": 9.5, "currency": "CAD"}/' \
+    -e 's/"Order 1: 9.50"/"Order 1: 9.50 CAD"/' test_orders.py > t.new && mv t.new test_orders.py
+}
+```
+
+`evals/tasks/dev/multifile-02.sh`:
+
+```bash
+# family: multifile
+PROMPT='Agent: add a /health route that returns { status: 200, body: "ok" }. Put its handler in handlers/health.js like the existing hello handler, register it in index.js, add a test to index.test.js, and run node --test index.test.js.'
+
+fixture() {
+  mkdir -p handlers
+  cat > router.js <<'EOF'
+const routes = {};
+
+function register(path, handler) {
+  routes[path] = handler;
+}
+
+function handle(path) {
+  const h = routes[path];
+  return h ? h() : { status: 404 };
+}
+
+module.exports = { register, handle };
+EOF
+  cat > handlers/hello.js <<'EOF'
+module.exports = () => ({ status: 200, body: 'hello' });
+EOF
+  cat > index.js <<'EOF'
+const router = require('./router');
+
+router.register('/hello', require('./handlers/hello'));
+
+module.exports = router;
+EOF
+  cat > index.test.js <<'EOF'
+const test = require('node:test');
+const assert = require('node:assert');
+const app = require('./index');
+
+test('hello', () => assert.deepStrictEqual(app.handle('/hello'), { status: 200, body: 'hello' }));
+test('unknown', () => assert.deepStrictEqual(app.handle('/nope'), { status: 404 }));
+EOF
+}
+
+check() {
+  [[ -f handlers/health.js ]] || { echo "no handlers/health.js"; return 1; }
+  grep -q '/health' index.test.js || { echo "no /health test"; return 1; }
+  node --test index.test.js || return 1
+  node -e '
+const assert = require("node:assert");
+const app = require("./index");
+assert.deepStrictEqual(app.handle("/health"), { status: 200, body: "ok" });
+assert.deepStrictEqual(app.handle("/hello"), { status: 200, body: "hello" });
+assert.deepStrictEqual(app.handle("/nope"), { status: 404 });
+assert.deepStrictEqual(require("./handlers/health")(), { status: 200, body: "ok" });
+'
+}
+
+solve() {
+  cat > handlers/health.js <<'EOF'
+module.exports = () => ({ status: 200, body: 'ok' });
+EOF
+  cat > index.js <<'EOF'
+const router = require('./router');
+
+router.register('/hello', require('./handlers/hello'));
+router.register('/health', require('./handlers/health'));
+
+module.exports = router;
+EOF
+  cat >> index.test.js <<'EOF'
+test('health', () => assert.deepStrictEqual(app.handle('/health'), { status: 200, body: 'ok' }));
+EOF
+}
+```
+
+`evals/tasks/dev/multifile-03.sh`:
+
+```bash
+# family: multifile
+PROMPT='Agent: rename the config key "timeout" to "timeout_seconds" in config.json, loader.py, client.py, and test_client.py, so nothing reads "timeout" any more. Keep the validation in loader.py working, and run python3 -m unittest.'
+
+fixture() {
+  cat > config.json <<'EOF'
+{ "url": "http://localhost:8080", "timeout": 30 }
+EOF
+  cat > loader.py <<'EOF'
+import json
+
+
+def load(path):
+    with open(path) as f:
+        cfg = json.load(f)
+    if not isinstance(cfg.get("timeout"), int):
+        raise ValueError("timeout must be an integer")
+    return cfg
+EOF
+  cat > client.py <<'EOF'
+class Client:
+    def __init__(self, cfg):
+        self.url = cfg["url"]
+        self.timeout = cfg["timeout"]
+
+    def describe(self):
+        return f"{self.url} (timeout {self.timeout}s)"
+EOF
+  cat > test_client.py <<'EOF'
+import unittest
+
+from client import Client
+from loader import load
+
+
+class ClientTest(unittest.TestCase):
+    def test_from_file(self):
+        self.assertEqual(Client(load("config.json")).timeout, 30)
+
+    def test_describe(self):
+        c = Client({"url": "http://x", "timeout": 5})
+        self.assertEqual(c.describe(), "http://x (timeout 5s)")
+EOF
+}
+
+check() {
+  python3 -m unittest -q || return 1
+  if grep -nE "[\"']timeout[\"']" ./*.py ./*.json; then echo "the old key is still used"; return 1; fi
+  python3 - <<'EOF'
+import json, os, tempfile
+from client import Client
+from loader import load
+cfg = json.load(open("config.json"))
+assert cfg.get("timeout_seconds") == 30 and "timeout" not in cfg, cfg
+assert Client(load("config.json")).timeout == 30
+bad = os.path.join(tempfile.mkdtemp(), "bad.json")
+json.dump({"url": "u", "timeout_seconds": "30"}, open(bad, "w"))
+try:
+    load(bad)
+    raise SystemExit("a string timeout_seconds must be rejected")
+except ValueError:
+    pass
+EOF
+}
+
+solve() {
+  local f
+  for f in config.json loader.py client.py test_client.py; do
+    sed -e 's/"timeout"/"timeout_seconds"/g' -e 's/timeout must be/timeout_seconds must be/' "$f" > "$f.new" && mv "$f.new" "$f"
+  done
+}
+```
+
+`evals/tasks/dev/refactor-01.sh`:
+
+```bash
+# family: refactor
+PROMPT='Agent: the email check in users.py is duplicated. Move it into one function, validate_email(email), that raises ValueError for an invalid address, and call it from both create_user and update_email. Keep the behaviour the same and keep test_users.py passing without editing it.'
+
+fixture() {
+  cat > users.py <<'EOF'
+USERS = {}
+
+
+def create_user(username, email):
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise ValueError("invalid email")
+    if username in USERS:
+        raise ValueError("user exists")
+    USERS[username] = {"email": email}
+    return USERS[username]
+
+
+def update_email(username, email):
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise ValueError("invalid email")
+    if username not in USERS:
+        raise KeyError(username)
+    USERS[username]["email"] = email
+    return USERS[username]
+EOF
+  cat > test_users.py <<'EOF'
+import unittest
+
+import users
+
+
+class UsersTest(unittest.TestCase):
+    def setUp(self):
+        users.USERS.clear()
+
+    def test_create(self):
+        self.assertEqual(users.create_user("ann", "ann@mail")["email"], "ann@mail")
+
+    def test_create_rejects_bad_email(self):
+        with self.assertRaises(ValueError):
+            users.create_user("ann", "ann.example.org")
+
+    def test_update(self):
+        users.create_user("ann", "ann@mail")
+        self.assertEqual(users.update_email("ann", "a@mail")["email"], "a@mail")
+
+    def test_update_unknown(self):
+        with self.assertRaises(KeyError):
+            users.update_email("bob", "bob@mail")
+EOF
+}
+
+check() {
+  unchanged "$1" test_users.py || return 1
+  python3 -m unittest -q || return 1
+  python3 - <<'EOF'
+import ast
+import users
+tree = ast.parse(open("users.py").read())
+funcs = {f.name: f for f in tree.body if isinstance(f, ast.FunctionDef)}
+assert "validate_email" in funcs, "no validate_email function"
+for name in ("create_user", "update_email"):
+    body = funcs[name]
+    calls = [n for n in ast.walk(body) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "validate_email"]
+    assert calls, f"{name} does not call validate_email"
+    ats = [n for n in ast.walk(body) if isinstance(n, ast.Constant) and n.value == "@"]
+    assert not ats, f"{name} still checks the address itself"
+users.validate_email("a@b")
+for bad in ("ab", "@b", "a@"):
+    try:
+        users.validate_email(bad)
+        raise SystemExit(f"validate_email accepted {bad}")
+    except ValueError:
+        pass
+EOF
+}
+
+solve() {
+  cat > users.py <<'EOF'
+USERS = {}
+
+
+def validate_email(email):
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise ValueError("invalid email")
+
+
+def create_user(username, email):
+    validate_email(email)
+    if username in USERS:
+        raise ValueError("user exists")
+    USERS[username] = {"email": email}
+    return USERS[username]
+
+
+def update_email(username, email):
+    validate_email(email)
+    if username not in USERS:
+        raise KeyError(username)
+    USERS[username]["email"] = email
+    return USERS[username]
+EOF
+}
+```
+
+`evals/tasks/dev/refactor-02.sh`:
+
+```bash
+# family: refactor
+PROMPT='Agent: rename the function calc_total to order_total everywhere in this repo (the definition, every caller, and the tests), then run python3 -m unittest and make sure it passes.'
+
+fixture() {
+  cat > pricing.py <<'EOF'
+def calc_total(items):
+    """items: (unit_price, quantity) pairs."""
+    return sum(price * qty for price, qty in items)
+EOF
+  cat > cart.py <<'EOF'
+from pricing import calc_total
+
+
+class Cart:
+    def __init__(self):
+        self.items = []
+
+    def add(self, price, qty=1):
+        self.items.append((price, qty))
+
+    def total(self):
+        return calc_total(self.items)
+EOF
+  cat > receipt.py <<'EOF'
+import pricing
+
+
+def render(items):
+    lines = [f"{qty} x {price:.2f}" for price, qty in items]
+    lines.append(f"Total: {pricing.calc_total(items):.2f}")
+    return "\n".join(lines)
+EOF
+  cat > test_cart.py <<'EOF'
+import unittest
+
+from cart import Cart
+from pricing import calc_total
+from receipt import render
+
+
+class CartTest(unittest.TestCase):
+    def test_total(self):
+        c = Cart()
+        c.add(2.0, 3)
+        self.assertEqual(c.total(), 6.0)
+
+    def test_calc_total(self):
+        self.assertEqual(calc_total([(1.5, 2)]), 3.0)
+
+    def test_receipt(self):
+        self.assertIn("Total: 3.00", render([(1.5, 2)]))
+EOF
+}
+
+check() {
+  if grep -rn calc_total --include='*.py' .; then echo "calc_total is still used"; return 1; fi
+  python3 -m unittest -q || return 1
+  python3 - <<'EOF'
+from cart import Cart
+from pricing import order_total
+from receipt import render
+assert order_total([(2.0, 3), (1.5, 2)]) == 9.0
+c = Cart()
+c.add(4.0, 2)
+assert c.total() == 8.0
+assert "Total: 9.00" in render([(2.0, 3), (1.5, 2)])
+EOF
+}
+
+solve() {
+  local f
+  for f in pricing.py cart.py receipt.py test_cart.py; do
+    sed 's/calc_total/order_total/g' "$f" > "$f.new" && mv "$f.new" "$f"
+  done
+}
+```
+
+`evals/tasks/dev/refactor-03.sh`:
+
+```bash
+# family: refactor
+PROMPT='Agent: the sales tax rate 0.13 is hard-coded in several places. Put it in one constant, TAX_RATE, in a new file config.py, import it wherever the rate is used, and keep python3 -m unittest passing without editing test_tax.py.'
+
+fixture() {
+  cat > invoice.py <<'EOF'
+def tax(subtotal):
+    return round(subtotal * 0.13, 2)
+
+
+def total(subtotal):
+    return round(subtotal + subtotal * 0.13, 2)
+EOF
+  cat > quote.py <<'EOF'
+def quote_line(name, price):
+    return f"{name}: {price:.2f} + tax {price * 0.13:.2f}"
+EOF
+  cat > test_tax.py <<'EOF'
+import unittest
+
+import invoice
+import quote
+
+
+class TaxTest(unittest.TestCase):
+    def test_tax(self):
+        self.assertEqual(invoice.tax(100), 13.0)
+
+    def test_total(self):
+        self.assertEqual(invoice.total(200), 226.0)
+
+    def test_quote(self):
+        self.assertEqual(quote.quote_line("pen", 10), "pen: 10.00 + tax 1.30")
+EOF
+}
+
+check() {
+  unchanged "$1" test_tax.py || return 1
+  python3 -m unittest -q || return 1
+  local hits
+  hits="$(grep -rln '0\.13' --include='*.py' . | grep -v '^./test_tax.py$' || true)"
+  [[ "$hits" == "./config.py" ]] || { echo "0.13 should appear only in config.py; found in: $hits"; return 1; }
+  grep -q TAX_RATE invoice.py && grep -q TAX_RATE quote.py || { echo "invoice.py and quote.py must use TAX_RATE"; return 1; }
+  python3 -c 'import config; assert config.TAX_RATE == 0.13'
+}
+
+solve() {
+  printf 'TAX_RATE = 0.13\n' > config.py
+  cat > invoice.py <<'EOF'
+from config import TAX_RATE
+
+
+def tax(subtotal):
+    return round(subtotal * TAX_RATE, 2)
+
+
+def total(subtotal):
+    return round(subtotal + subtotal * TAX_RATE, 2)
+EOF
+  cat > quote.py <<'EOF'
+from config import TAX_RATE
+
+
+def quote_line(name, price):
+    return f"{name}: {price:.2f} + tax {price * TAX_RATE:.2f}"
+EOF
+}
+```
+
+`evals/tasks/dev/shell-01.sh`:
+
+```bash
+# family: shell
+PROMPT='Agent: add a Makefile with two targets: "test" runs the unit tests with python3 -m unittest, and "clean" deletes every __pycache__ directory in the repo. Make sure make test passes and make clean works.'
+
+fixture() {
+  mkdir -p pkg
+  cat > pkg/__init__.py <<'EOF'
+EOF
+  cat > pkg/greet.py <<'EOF'
+def greet(name):
+    return f"hello {name}"
+EOF
+  cat > test_greet.py <<'EOF'
+import unittest
+
+from pkg.greet import greet
+
+
+class GreetTest(unittest.TestCase):
+    def test_greet(self):
+        self.assertEqual(greet("ann"), "hello ann")
+EOF
+}
+
+check() {
+  [[ -f Makefile ]] || { echo "no Makefile"; return 1; }
+  make test || { echo "make test failed"; return 1; }
+  mkdir -p pkg/__pycache__ deep/er/__pycache__ && touch deep/er/__pycache__/x.pyc
+  make clean || { echo "make clean failed"; return 1; }
+  if find . -name __pycache__ -type d | grep -q .; then echo "make clean left __pycache__ behind"; return 1; fi
+  printf 'def greet(name):\n    return "broken"\n' > pkg/greet.py
+  if make test >/dev/null 2>&1; then echo "make test passes even when a test fails"; return 1; fi
+}
+
+solve() {
+  printf '.PHONY: test clean\n\ntest:\n\tpython3 -m unittest -q\n\nclean:\n\tfind . -name __pycache__ -type d -prune -exec rm -rf {} +\n' > Makefile
+}
+```
+
+`evals/tasks/dev/shell-02.sh`:
+
+```bash
+# family: shell
+PROMPT='Agent: write an executable script count.sh that takes a directory as its only argument and prints the number of files whose names end in .log, anywhere under that directory, that contain the text ERROR. Try it on the logs/ directory here.'
+
+fixture() {
+  mkdir -p logs/sub
+  printf 'ok\nERROR disk full\n' > logs/a.log
+  printf 'all fine\n' > logs/b.log
+  printf 'ERROR timeout\n' > logs/sub/c.log
+  printf 'ERROR but not a log file\n' > logs/d.txt
+}
+
+check() {
+  [[ -x count.sh ]] || { echo "count.sh is missing or not executable"; return 1; }
+  [[ "$(./count.sh logs | tr -d '[:space:]')" == 2 ]] || { echo "logs/: expected 2, got '$(./count.sh logs)'"; return 1; }
+  mkdir -p "t/deep dir" t/empty
+  printf 'ERROR: x\n' > "t/one two.log"
+  printf 'x\nERROR\n' > "t/deep dir/three.log"
+  printf 'nothing\n' > t/four.log
+  printf 'ERROR\n' > t/five.log.bak
+  [[ "$(./count.sh t | tr -d '[:space:]')" == 2 ]] || { echo "hidden tree: expected 2, got '$(./count.sh t)'"; return 1; }
+  [[ "$(./count.sh t/empty | tr -d '[:space:]')" == 0 ]] || { echo "empty dir: expected 0, got '$(./count.sh t/empty)'"; return 1; }
+}
+
+solve() {
+  cat > count.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+find "$1" -type f -name '*.log' -exec grep -l ERROR {} + | wc -l | tr -d ' '
+EOF
+  chmod +x count.sh
+}
+```
+
+`evals/tasks/dev/shell-03.sh`:
+
+```bash
+# family: shell
+PROMPT='Agent: ./build.sh fails. Fix it so that running ./build.sh with no environment variables set writes the src/*.txt files joined together to dist/out.txt, while OUT_DIR, when set, still chooses another output directory. Keep set -euo pipefail.'
+
+fixture() {
+  mkdir -p src
+  cat > build.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+out_dir="${OUT_DIR}"
+mkdir -p "$out_dir"
+cat src/*.txt > "$out_dir/out.txt"
+echo "built $out_dir/out.txt"
+EOF
+  chmod +x build.sh
+  printf 'one\n' > src/a.txt
+  printf 'two\n' > src/b.txt
+}
+
+check() {
+  [[ -x build.sh ]] || { echo "build.sh is not executable"; return 1; }
+  grep -q 'set -euo pipefail' build.sh || { echo "set -euo pipefail was removed"; return 1; }
+  rm -rf dist alt
+  env -u OUT_DIR ./build.sh || { echo "./build.sh failed"; return 1; }
+  [[ "$(cat dist/out.txt)" == $'one\ntwo' ]] || { echo "dist/out.txt is wrong"; return 1; }
+  OUT_DIR=alt ./build.sh || return 1
+  [[ -f alt/out.txt ]] || { echo "OUT_DIR is ignored"; return 1; }
+}
+
+solve() {
+  sed 's/"${OUT_DIR}"/"${OUT_DIR:-dist}"/' build.sh > b.new && cat b.new > build.sh && rm b.new
+}
+```
+
+- [ ] **Step 6: Write the 12 held-out tasks**
+
+Same families, different code. The researcher never sees these files or their scores; they are mounted only for the final scoring.
+
+`evals/tasks/heldout/answer-04.sh`:
+
+```bash
+# family: answer
+PROMPT='Agent: which environment variable actually sets the log level of this program? Check the code, not only the README. Write only the variable name to ANSWER.txt.'
+
+fixture() {
+  cat > app.py <<'EOF'
+import logging
+import os
+
+from settings import LEVEL_VAR
+
+logging.basicConfig(level=os.environ.get(LEVEL_VAR, "INFO"))
+logging.getLogger(__name__).info("started")
+EOF
+  cat > settings.py <<'EOF'
+PREFIX = "APP_"
+LEVEL_VAR = PREFIX + "VERBOSITY"
+LOG_LEVEL = "INFO"  # default only; not read from the environment
+EOF
+  printf '# app\n\nSet LOG_LEVEL=DEBUG to see debug output.\n' > README.md
+}
+
+check() {
+  unchanged "$1" app.py settings.py || return 1
+  answer_is "$1" app_verbosity
+}
+
+solve() {
+  printf 'APP_VERBOSITY\n' > ANSWER.txt
+}
+```
+
+`evals/tasks/heldout/answer-05.sh`:
+
+```bash
+# family: answer
+PROMPT='Agent: find out what python3 tool.py --count prints for the words file in data/, and write only that number to ANSWER.txt. Do not change tool.py.'
+
+fixture() {
+  mkdir -p data
+  cat > tool.py <<'EOF'
+import os
+import sys
+from collections import Counter
+
+
+def main(argv):
+    path = os.environ.get("WORDS_FILE")
+    if not path:
+        sys.exit("tool.py: set WORDS_FILE to the words file")
+    words = open(path).read().lower().split()
+    if "--count" in argv:
+        print(sum(1 for n in Counter(words).values() if n > 1))
+    else:
+        print(len(words))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+EOF
+  printf 'apple banana Apple cherry banana\ndate apple Elder elder fig\n' > data/words.txt
+}
+
+check() {
+  unchanged "$1" tool.py data/words.txt || return 1
+  answer_is "$1" 3
+}
+
+solve() {
+  WORDS_FILE=data/words.txt python3 tool.py --count > ANSWER.txt
+}
+```
+
+`evals/tasks/heldout/bugfix-04.sh`:
+
+```bash
+# family: bugfix
+PROMPT='Agent: parse_duration in durations.py returns wrong numbers and test_durations.py fails. Fix the bug so python3 -m unittest passes, without editing the tests.'
+
+fixture() {
+  cat > durations.py <<'EOF'
+import re
+
+
+def parse_duration(text):
+    """'1h30m15s' -> seconds. Any of the parts may be missing."""
+    total = 0
+    for value, unit in re.findall(r"(\d+)([hms])", text):
+        if unit == "h":
+            total += int(value) * 3600
+        elif unit == "m":
+            total += int(value) * 3600
+        else:
+            total += int(value)
+    return total
+EOF
+  cat > test_durations.py <<'EOF'
+import unittest
+
+from durations import parse_duration
+
+
+class DurationTest(unittest.TestCase):
+    def test_hours(self):
+        self.assertEqual(parse_duration("1h"), 3600)
+
+    def test_hours_and_minutes(self):
+        self.assertEqual(parse_duration("1h30m"), 5400)
+EOF
+}
+
+check() {
+  unchanged "$1" test_durations.py || return 1
+  python3 -m unittest -q || return 1
+  python3 - <<'EOF'
+from durations import parse_duration
+assert parse_duration("45s") == 45
+assert parse_duration("2m5s") == 125
+assert parse_duration("1h1m1s") == 3661
+assert parse_duration("") == 0
+EOF
+}
+
+solve() {
+  python3 - <<'EOF'
+p = "durations.py"
+s = open(p).read()
+s = s.replace('elif unit == "m":\n            total += int(value) * 3600', 'elif unit == "m":\n            total += int(value) * 60')
+open(p, "w").write(s)
+EOF
+}
+```
+
+`evals/tasks/heldout/bugfix-05.sh`:
+
+```bash
+# family: bugfix
+PROMPT='Agent: countWords in words.js miscounts some inputs and words.test.js fails. Fix words.js so node --test words.test.js passes, without editing the test file.'
+
+fixture() {
+  cat > words.js <<'EOF'
+function countWords(text) {
+  if (text === '') return 0;
+  return text.split(' ').length;
+}
+
+module.exports = { countWords };
+EOF
+  cat > words.test.js <<'EOF'
+const test = require('node:test');
+const assert = require('node:assert');
+const { countWords } = require('./words');
+
+test('single spaces', () => assert.strictEqual(countWords('one two three'), 3));
+test('mixed whitespace', () => assert.strictEqual(countWords('one  two\nthree'), 3));
+EOF
+}
+
+check() {
+  unchanged "$1" words.test.js || return 1
+  node --test words.test.js || return 1
+  node -e '
+const assert = require("node:assert");
+const { countWords } = require("./words");
+assert.strictEqual(countWords("   "), 0);
+assert.strictEqual(countWords("\tsolo\n"), 1);
+assert.strictEqual(countWords("a b  c   d"), 4);
+assert.strictEqual(countWords(""), 0);
+'
+}
+
+solve() {
+  cat > words.js <<'EOF'
+function countWords(text) {
+  const words = text.trim().split(/\s+/);
+  return words[0] === '' ? 0 : words.length;
+}
+
+module.exports = { countWords };
+EOF
+}
+```
+
+`evals/tasks/heldout/feature-04.sh`:
+
+```bash
+# family: feature
+PROMPT='Agent: add a to_csv() method to Table in table.py that returns the table as CSV text: a header line with the column names, then one line per row, with values that contain a comma or a double quote quoted the standard CSV way. Add a test to test_table.py and run python3 -m unittest.'
+
+fixture() {
+  cat > table.py <<'EOF'
+class Table:
+    def __init__(self, columns):
+        self.columns = list(columns)
+        self.rows = []
+
+    def add_row(self, *values):
+        if len(values) != len(self.columns):
+            raise ValueError("wrong number of values")
+        self.rows.append(list(values))
+EOF
+  cat > test_table.py <<'EOF'
+import unittest
+
+from table import Table
+
+
+class TableTest(unittest.TestCase):
+    def test_add_row_checks_width(self):
+        with self.assertRaises(ValueError):
+            Table(["a", "b"]).add_row(1)
+EOF
+}
+
+check() {
+  python3 -m unittest -q || return 1
+  grep -q to_csv test_table.py || { echo "no to_csv test"; return 1; }
+  python3 - <<'EOF'
+import csv, io
+from table import Table
+t = Table(["name", "note"])
+t.add_row("a", "x")
+t.add_row("b", 'say "hi", ok')
+out = t.to_csv()
+assert out.splitlines()[0] == "name,note", out
+assert list(csv.reader(io.StringIO(out))) == [["name", "note"], ["a", "x"], ["b", 'say "hi", ok']], out
+assert Table(["only"]).to_csv().strip() == "only"
+EOF
+}
+
+solve() {
+  cat > table.py <<'EOF'
+import csv
+import io
+
+
+class Table:
+    def __init__(self, columns):
+        self.columns = list(columns)
+        self.rows = []
+
+    def add_row(self, *values):
+        if len(values) != len(self.columns):
+            raise ValueError("wrong number of values")
+        self.rows.append(list(values))
+
+    def to_csv(self):
+        buf = io.StringIO()
+        writer = csv.writer(buf, lineterminator="\n")
+        writer.writerow(self.columns)
+        writer.writerows(self.rows)
+        return buf.getvalue()
+EOF
+  cat >> test_table.py <<'EOF'
+
+    def test_to_csv_quotes(self):
+        t = Table(["a"])
+        t.add_row("x,y")
+        self.assertEqual(t.to_csv(), 'a\n"x,y"\n')
+EOF
+}
+```
+
+`evals/tasks/heldout/feature-05.sh`:
+
+```bash
+# family: feature
+PROMPT='Agent: add an isLeapYear(year) function to dates.js and export it, then use it so daysInMonth returns 29 for February in leap years. Add tests in dates.test.js and run node --test dates.test.js.'
+
+fixture() {
+  cat > dates.js <<'EOF'
+const DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+function daysInMonth(year, month) {
+  return DAYS[month - 1];
+}
+
+module.exports = { daysInMonth };
+EOF
+  cat > dates.test.js <<'EOF'
+const test = require('node:test');
+const assert = require('node:assert');
+const { daysInMonth } = require('./dates');
+
+test('january', () => assert.strictEqual(daysInMonth(2023, 1), 31));
+test('february in a common year', () => assert.strictEqual(daysInMonth(2023, 2), 28));
+EOF
+}
+
+check() {
+  node --test dates.test.js || return 1
+  grep -q isLeapYear dates.test.js || { echo "no isLeapYear test"; return 1; }
+  node -e '
+const assert = require("node:assert");
+const d = require("./dates");
+assert.strictEqual(d.isLeapYear(2024), true);
+assert.strictEqual(d.isLeapYear(1900), false);
+assert.strictEqual(d.isLeapYear(2000), true);
+assert.strictEqual(d.isLeapYear(2023), false);
+assert.strictEqual(d.daysInMonth(2024, 2), 29);
+assert.strictEqual(d.daysInMonth(1900, 2), 28);
+assert.strictEqual(d.daysInMonth(2000, 2), 29);
+assert.strictEqual(d.daysInMonth(2024, 4), 30);
+'
+}
+
+solve() {
+  cat > dates.js <<'EOF'
+const DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+function isLeapYear(year) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function daysInMonth(year, month) {
+  if (month === 2 && isLeapYear(year)) return 29;
+  return DAYS[month - 1];
+}
+
+module.exports = { daysInMonth, isLeapYear };
+EOF
+  cat >> dates.test.js <<'EOF'
+test('leap years', () => {
+  const { isLeapYear } = require('./dates');
+  assert.strictEqual(isLeapYear(2024), true);
+  assert.strictEqual(isLeapYear(2100), false);
+});
+EOF
+}
+```
+
+`evals/tasks/heldout/multifile-04.sh`:
+
+```bash
+# family: multifile
+PROMPT='Agent: add a priority to tasks. Task in models.py gets a priority field (integer, default 0); Store.pending() in store.py returns the highest priority first, ties keeping insertion order; and cli.py accepts "add <title> --priority N". Add tests and run python3 -m unittest.'
+
+fixture() {
+  cat > models.py <<'EOF'
+from dataclasses import dataclass
+
+
+@dataclass
+class Task:
+    title: str
+    done: bool = False
+EOF
+  cat > store.py <<'EOF'
+class Store:
+    def __init__(self):
+        self.tasks = []
+
+    def add(self, task):
+        self.tasks.append(task)
+
+    def pending(self):
+        return [t for t in self.tasks if not t.done]
+EOF
+  cat > cli.py <<'EOF'
+import argparse
+
+from models import Task
+
+
+def main(argv, store):
+    parser = argparse.ArgumentParser(prog="tasks")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    add = sub.add_parser("add")
+    add.add_argument("title")
+    sub.add_parser("list")
+    args = parser.parse_args(argv)
+    if args.cmd == "add":
+        store.add(Task(args.title))
+    else:
+        for t in store.pending():
+            print(t.title)
+EOF
+  cat > test_tasks.py <<'EOF'
+import unittest
+
+from cli import main
+from store import Store
+
+
+class TasksTest(unittest.TestCase):
+    def test_add_and_list(self):
+        s = Store()
+        main(["add", "write"], s)
+        self.assertEqual([t.title for t in s.pending()], ["write"])
+EOF
+}
+
+check() {
+  python3 -m unittest -q || return 1
+  [[ "$(grep -c 'def test_' test_tasks.py)" -ge 2 ]] || { echo "no new test"; return 1; }
+  python3 - <<'EOF'
+from cli import main
+from models import Task
+from store import Store
+assert Task("a").priority == 0
+s = Store()
+for title, p in (("low", 0), ("high", 5), ("mid", 2), ("high2", 5)):
+    s.add(Task(title, priority=p))
+assert [t.title for t in s.pending()] == ["high", "high2", "mid", "low"], [t.title for t in s.pending()]
+c = Store()
+main(["add", "x", "--priority", "5"], c)
+main(["add", "y"], c)
+assert [(t.title, t.priority) for t in c.pending()] == [("x", 5), ("y", 0)]
+EOF
+}
+
+solve() {
+  cat > models.py <<'EOF'
+from dataclasses import dataclass
+
+
+@dataclass
+class Task:
+    title: str
+    done: bool = False
+    priority: int = 0
+EOF
+  cat > store.py <<'EOF'
+class Store:
+    def __init__(self):
+        self.tasks = []
+
+    def add(self, task):
+        self.tasks.append(task)
+
+    def pending(self):
+        return sorted((t for t in self.tasks if not t.done), key=lambda t: -t.priority)
+EOF
+  python3 - <<'EOF'
+s = open("cli.py").read()
+s = s.replace('add.add_argument("title")\n', 'add.add_argument("title")\n    add.add_argument("--priority", type=int, default=0)\n')
+s = s.replace("store.add(Task(args.title))", "store.add(Task(args.title, priority=args.priority))")
+open("cli.py", "w").write(s)
+EOF
+  cat >> test_tasks.py <<'EOF'
+
+    def test_priority_first(self):
+        s = Store()
+        main(["add", "later"], s)
+        main(["add", "now", "--priority", "3"], s)
+        self.assertEqual([t.title for t in s.pending()], ["now", "later"])
+EOF
+}
+```
+
+`evals/tasks/heldout/multifile-05.sh`:
+
+```bash
+# family: multifile
+PROMPT='Agent: add an optional limit to search in search.js (search(items, term, limit)), and make handleSearch in api.js pass it through from query.limit, which arrives as a string as it would from a URL. Without a limit, behaviour stays the same. Add tests and run node --test on the test files.'
+
+fixture() {
+  cat > search.js <<'EOF'
+function search(items, term) {
+  return items.filter((item) => item.includes(term));
+}
+
+module.exports = { search };
+EOF
+  cat > api.js <<'EOF'
+const { search } = require('./search');
+
+const DATA = ['apple', 'apricot', 'banana', 'avocado', 'grape'];
+
+function handleSearch(query) {
+  return { results: search(DATA, query.q) };
+}
+
+module.exports = { handleSearch, DATA };
+EOF
+  cat > api.test.js <<'EOF'
+const test = require('node:test');
+const assert = require('node:assert');
+const { handleSearch } = require('./api');
+
+test('finds matches', () => assert.deepStrictEqual(handleSearch({ q: 'ap' }).results, ['apple', 'apricot', 'grape']));
+EOF
+}
+
+check() {
+  node --test ./*.test.js || return 1
+  grep -q limit ./*.test.js || { echo "no limit test"; return 1; }
+  node -e '
+const assert = require("node:assert");
+const { search } = require("./search");
+const { handleSearch } = require("./api");
+assert.deepStrictEqual(search(["aa", "ab", "ac"], "a", 2), ["aa", "ab"]);
+assert.deepStrictEqual(search(["aa", "ab", "ac"], "a"), ["aa", "ab", "ac"]);
+assert.deepStrictEqual(handleSearch({ q: "a", limit: "1" }).results, ["apple"]);
+assert.strictEqual(handleSearch({ q: "a" }).results.length, 5);
+'
+}
+
+solve() {
+  cat > search.js <<'EOF'
+function search(items, term, limit) {
+  const found = items.filter((item) => item.includes(term));
+  return limit === undefined ? found : found.slice(0, limit);
+}
+
+module.exports = { search };
+EOF
+  sed 's/search(DATA, query.q)/search(DATA, query.q, query.limit === undefined ? undefined : Number(query.limit))/' api.js > api.new && mv api.new api.js
+  cat >> api.test.js <<'EOF'
+test('limit', () => assert.deepStrictEqual(handleSearch({ q: 'ap', limit: '2' }).results, ['apple', 'apricot']));
+EOF
+}
+```
+
+`evals/tasks/heldout/refactor-04.sh`:
+
+```bash
+# family: refactor
+PROMPT='Agent: move the string helpers (capitalize and reverse) out of utils.js into a new file strings.js, and the number helpers (sum and avg) into a new file numbers.js. utils.js should re-export all four so existing callers keep working. Keep node --test utils.test.js passing without editing it.'
+
+fixture() {
+  cat > utils.js <<'EOF'
+function capitalize(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function reverse(s) {
+  return s.split('').reverse().join('');
+}
+
+function sum(xs) {
+  return xs.reduce((a, b) => a + b, 0);
+}
+
+function avg(xs) {
+  return xs.length ? sum(xs) / xs.length : 0;
+}
+
+module.exports = { capitalize, reverse, sum, avg };
+EOF
+  cat > utils.test.js <<'EOF'
+const test = require('node:test');
+const assert = require('node:assert');
+const u = require('./utils');
+
+test('capitalize', () => assert.strictEqual(u.capitalize('ok'), 'Ok'));
+test('reverse', () => assert.strictEqual(u.reverse('abc'), 'cba'));
+test('sum', () => assert.strictEqual(u.sum([1, 2, 3]), 6));
+test('avg', () => assert.strictEqual(u.avg([2, 4]), 3));
+EOF
+}
+
+check() {
+  unchanged "$1" utils.test.js || return 1
+  node --test utils.test.js || return 1
+  node -e '
+const assert = require("node:assert");
+const u = require("./utils"), s = require("./strings"), n = require("./numbers");
+for (const k of ["capitalize", "reverse"]) assert.strictEqual(u[k], s[k], k + " must come from strings.js");
+for (const k of ["sum", "avg"]) assert.strictEqual(u[k], n[k], k + " must come from numbers.js");
+assert.strictEqual(n.avg([]), 0);
+'
+}
+
+solve() {
+  cat > strings.js <<'EOF'
+function capitalize(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function reverse(s) {
+  return s.split('').reverse().join('');
+}
+
+module.exports = { capitalize, reverse };
+EOF
+  cat > numbers.js <<'EOF'
+function sum(xs) {
+  return xs.reduce((a, b) => a + b, 0);
+}
+
+function avg(xs) {
+  return xs.length ? sum(xs) / xs.length : 0;
+}
+
+module.exports = { sum, avg };
+EOF
+  cat > utils.js <<'EOF'
+module.exports = { ...require('./strings'), ...require('./numbers') };
+EOF
+}
+```
+
+`evals/tasks/heldout/refactor-05.sh`:
+
+```bash
+# family: refactor
+PROMPT='Agent: worker.py reports progress with print(). Switch it to the logging module with a module-level logger named "worker": info for progress, warning for skipped jobs. Leave no print() calls in worker.py and keep python3 -m unittest passing without editing test_worker.py.'
+
+fixture() {
+  cat > worker.py <<'EOF'
+def process(jobs):
+    done = []
+    for job in jobs:
+        print("processing", job)
+        if job < 0:
+            print("skipping negative job", job)
+            continue
+        done.append(job * 2)
+    print("finished", len(done), "jobs")
+    return done
+EOF
+  cat > test_worker.py <<'EOF'
+import unittest
+
+from worker import process
+
+
+class WorkerTest(unittest.TestCase):
+    def test_doubles(self):
+        self.assertEqual(process([1, 2]), [2, 4])
+
+    def test_skips_negative(self):
+        self.assertEqual(process([-1, 3]), [6])
+EOF
+}
+
+check() {
+  unchanged "$1" test_worker.py || return 1
+  python3 -m unittest -q || return 1
+  if grep -n 'print(' worker.py; then echo "print() is still used"; return 1; fi
+  python3 - <<'EOF'
+import unittest
+from worker import process
+
+
+class Hidden(unittest.TestCase):
+    def test_warning_for_skip(self):
+        with self.assertLogs("worker", "WARNING") as cm:
+            self.assertEqual(process([-5]), [])
+        self.assertTrue(any("-5" in line for line in cm.output), cm.output)
+
+    def test_info_for_progress(self):
+        with self.assertLogs("worker", "INFO") as cm:
+            process([1])
+        self.assertTrue(any(line.startswith("INFO:worker:") for line in cm.output), cm.output)
+
+
+result = unittest.TextTestRunner(verbosity=0).run(unittest.defaultTestLoader.loadTestsFromTestCase(Hidden))
+raise SystemExit(0 if result.wasSuccessful() else 1)
+EOF
+}
+
+solve() {
+  cat > worker.py <<'EOF'
+import logging
+
+log = logging.getLogger("worker")
+
+
+def process(jobs):
+    done = []
+    for job in jobs:
+        log.info("processing %s", job)
+        if job < 0:
+            log.warning("skipping negative job %s", job)
+            continue
+        done.append(job * 2)
+    log.info("finished %d jobs", len(done))
+    return done
+EOF
+}
+```
+
+`evals/tasks/heldout/shell-04.sh`:
+
+```bash
+# family: shell
+PROMPT='Agent: write an executable script rename.sh that takes a directory and renames every file directly in it (not in subdirectories) whose name ends in .jpeg so it ends in .jpg instead. Names may contain spaces. Test it on a copy of photos/, and leave photos/ itself as it is.'
+
+fixture() {
+  mkdir -p photos/old
+  printf 'a' > photos/beach.jpeg
+  printf 'b' > "photos/city night.jpeg"
+  printf 'c' > photos/old/film.jpeg
+}
+
+check() {
+  [[ -x rename.sh ]] || { echo "rename.sh is missing or not executable"; return 1; }
+  unchanged "$1" photos/beach.jpeg "photos/city night.jpeg" photos/old/film.jpeg || return 1
+  mkdir -p t/sub
+  printf '1' > t/a.jpeg; printf '2' > "t/b c.jpeg"; printf '3' > t/e.jpg; printf '4' > t/sub/f.jpeg; printf '5' > t/notes.txt
+  ./rename.sh t || { echo "rename.sh failed"; return 1; }
+  [[ -f t/a.jpg && -f "t/b c.jpg" && -f t/e.jpg && -f t/sub/f.jpeg && -f t/notes.txt ]] || { ls -R t; return 1; }
+  [[ ! -e t/a.jpeg && ! -e "t/b c.jpeg" ]] || { echo "old names still exist"; return 1; }
+  [[ "$(cat "t/b c.jpg")" == 2 ]] || return 1
+  mkdir -p t2 && ./rename.sh t2 || { echo "rename.sh fails on a directory with no .jpeg files"; return 1; }
+}
+
+solve() {
+  cat > rename.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+for f in "$1"/*.jpeg; do
+  [ -f "$f" ] || continue
+  mv -- "$f" "${f%.jpeg}.jpg"
+done
+EOF
+  chmod +x rename.sh
+}
+```
+
+`evals/tasks/heldout/shell-05.sh`:
+
+```bash
+# family: shell
+PROMPT='Agent: add a .gitignore so that git status no longer lists the build/ directory, compiled Python files, or the .env file, while new files under src/ and notes/ still show up. Check it with git status.'
+
+fixture() {
+  mkdir -p src notes
+  printf 'print("hi")\n' > src/app.py
+  printf '# todo\n' > notes/todo.md
+}
+
+# Created after the fixture commit, so they start out untracked.
+after_commit() {
+  mkdir -p build src/__pycache__
+  printf 'bin' > build/out.bin
+  printf 'pyc' > src/__pycache__/app.cpython-312.pyc
+  printf 'SECRET=1\n' > .env
+  printf 'draft\n' > notes/draft.md
+}
+
+check() {
+  [[ -f .gitignore ]] || { echo "no .gitignore"; return 1; }
+  local p
+  mkdir -p lib && printf 'x' > lib/mod.pyc && printf 'y' > build/more.o
+  for p in build/out.bin build/more.o src/__pycache__/app.cpython-312.pyc lib/mod.pyc .env; do
+    git check-ignore -q "$p" || { echo "not ignored: $p"; return 1; }
+  done
+  printf 'z' > src/new.py && printf 'z' > notes/new.md
+  for p in src/new.py notes/new.md notes/draft.md .gitignore; do
+    if git check-ignore -q "$p"; then echo "ignored but should not be: $p"; return 1; fi
+  done
+}
+
+solve() {
+  printf 'build/\n__pycache__/\n*.pyc\n.env\n' > .gitignore
+}
+```
+
+- [ ] **Step 7: Freeze the judge and prove the self-test can fail**
+
+```bash
+python3 scripts/lib/overnight.py manifest evals > evals/judge.sha256
+evals/selftest.sh
+cp evals/tasks/dev/bugfix-01.sh /tmp/no-solve.sh && sed -i.bak 's/^solve() {$/solve() { return 0/' /tmp/no-solve.sh
+evals/selftest.sh /tmp/no-solve.sh
+cp evals/tasks/dev/bugfix-01.sh /tmp/lax-check.sh && printf '\ncheck() { true; }\n' >> /tmp/lax-check.sh
+evals/selftest.sh /tmp/lax-check.sh
+cp evals/tasks/dev/bugfix-01.sh /tmp/keep.sh && printf '# touched\n' >> evals/tasks/dev/bugfix-01.sh
+evals/selftest.sh | tail -1; cp /tmp/keep.sh evals/tasks/dev/bugfix-01.sh && evals/selftest.sh | tail -1
+```
+Expected, in order: 30 `ok` lines and `evals selftest: OK (18 dev, 12 held-out)` in about 20 seconds; `FAIL /tmp/no-solve.sh: the reference solution fails its check`; `FAIL /tmp/lax-check.sh: the untouched fixture passes its check`; `FAIL evals/judge.sha256 is stale: ...`; after the restore, `OK` again. The self-test ran on macOS and in `node:22-bookworm` with `--network none` when this plan was written.
+
+- [ ] **Step 8: The baseline harness, the two prompts, and the container scripts**
+
+`evals/harness/baseline/knobs.json` (the Saturday defaults as shipped; if Task 22 step 7 chose another `max_num_seqs`, use that number here):
+
+```json
+{
+  "tool_parser": "qwen3_xml",
+  "max_num_seqs": 8,
+  "sampling": {}
+}
+```
+
+`evals/harness/baseline/HYPOTHESIS.md`:
+
+```markdown
+Baseline: the Saturday defaults as shipped. No CLAUDE.md guidance, no appended system prompt, no
+skills; vLLM with the qwen3_xml tool parser, max_num_seqs 8 (Task 22's load test), and the model's
+own sampling defaults.
+```
+
+The baseline has no `CLAUDE.md`, no `append-system-prompt.md`, and no `skills/`: every gain the loop finds is then attributable to something it added.
+
+`evals/prompts/researcher.md`:
+
+```markdown
+Agent: you are round {{ROUND}} of an overnight experiment that tunes the harness a coding agent runs with. The agent being tuned runs on the same model you do.
+
+Your working directory is the harness:
+- CLAUDE.md: guidance every agent session loads (may be absent)
+- append-system-prompt.md: text appended to the agent's system prompt (may be absent)
+- skills/<name>/SKILL.md: skills every session can use (front matter with name: and description:)
+- knobs.json: vLLM settings (tool_parser, max_num_seqs, sampling)
+- HYPOTHESIS.md: your hypothesis for this round
+
+Read /input/log.json (every round so far: what was tried, its DEV pass rate, and whether it was kept) and /input/failures.md (the failed DEV runs of the current best harness, with the agent's last message and what the checker printed).
+
+Then make exactly ONE change, the one you judge most likely to raise the pass rate:
+- write or rewrite CLAUDE.md, or
+- write or rewrite append-system-prompt.md, or
+- add or edit skills under skills/, or
+- change one key in knobs.json: tool_parser (qwen3_xml or qwen3_coder; how the model's tool calls are parsed), max_num_seqs (4 to 16; parallel sessions, which changes speed, not answers), or sampling (an object with any of temperature 0 to 2, top_p 0.01 to 1, top_k -1 or 1 to 200, repetition_penalty 0.8 to 1.5; {} means the model's own defaults).
+
+Rules:
+- One idea per round. A round that changes two of the things above is rejected.
+- Rewrite HYPOTHESIS.md. First line: the hypothesis in one sentence. Then the change, the evidence in the log or the failures that motivates it, and what you expect the pass rate to do.
+- Don't repeat a change the log shows was dropped unless HYPOTHESIS.md says why this time differs.
+- Keep guidance general. It must help on coding tasks you have never seen: don't name tasks, files, functions, or answers from failures.md. A held-out set of different tasks decides in the morning whether a gain is real.
+- Size limits: CLAUDE.md 8 KB, append-system-prompt.md 4 KB, skills 32 KB in total, HYPOTHESIS.md 2 KB.
+- You have no network beyond the model and no git: just edit the files. When done, reply with the first line of HYPOTHESIS.md.
+```
+
+`evals/prompts/eval-author.md`:
+
+```markdown
+Agent: you are the eval author for an overnight experiment. The agent being tuned has stopped improving on its task set, which may mean the tasks no longer separate good harnesses from bad ones. Your job is to propose new task families, not to solve tasks.
+
+/input holds the current DEV tasks (*.sh), the helper library lib.sh, and families.txt (the families that exist). Read two or three tasks to learn the format: a bash file with a "# family: <name>" line, PROMPT='Agent: ...', and the functions fixture (writes the starting repo into the current directory), check (exits 0 only when the task is done right, and may run hidden assertions), and solve (a reference solution, used only by the self-test).
+
+Write at most three new families, two tasks each, into your working directory as <family>-01.sh and <family>-02.sh (lowercase letters and dashes). Each family must be a kind of multi-step coding work not in families.txt: for example, debugging from a stack trace, adding input validation with error messages, writing a data migration, or fixing a broken build config. Each task must:
+- use only python3, node, bash, git, and make, with no network and nothing to install;
+- start from a fixture whose check fails, and pass once solve has run;
+- be neither trivial nor impossible: about ten minutes for a careful engineer;
+- check results, not wording, and not be passable by editing the tests (use unchanged from lib.sh for files that must stay as they are).
+
+Your files are self-tested, then tried three times with the baseline harness; only tasks it passes on one or two of the three tries are kept, and only for a later night, after a person reviews them. When done, reply with the list of files you wrote.
+```
+
+`evals/runner/strict-egress.sh`:
+
+```bash
+#!/usr/bin/env bash
+# Runs as root inside an overnight-loop container, once, before any agent session. Brings up the dev
+# container's default-deny firewall (init-firewall.sh), then empties its allow-list and puts back only
+# the gateway: the loop needs the model and nothing else, so it can't reach GitHub (where the kit
+# repo, and with it the held-out tasks, is public), package registries, or any other host.
+set -euo pipefail
+gateway="${GATEWAY_HOST:-llm.26.cohack.tetl.ca}"
+/usr/local/bin/init-firewall.sh >/tmp/init-firewall.log 2>&1 || { tail -5 /tmp/init-firewall.log; echo "strict-egress: init-firewall.sh failed"; exit 1; }
+ips="$(dig +short A "$gateway" | grep -E '^[0-9.]+$' || true)"
+[[ -n "$ips" ]] || { echo "strict-egress: $gateway did not resolve"; exit 1; }
+ipset flush allowed-domains
+for ip in $ips; do ipset add allowed-domains "$ip"; done
+curl -fsS -m 10 -o /dev/null "https://$gateway/health/readiness" || { echo "strict-egress: the gateway is not reachable"; exit 1; }
+if curl -sS -m 5 -o /dev/null https://api.github.com/zen 2>/dev/null; then
+  echo "strict-egress: GitHub is still reachable; refusing to continue"; exit 1
+fi
+echo "strict-egress: only $gateway is reachable"
+```
+
+`evals/runner/agent-run.sh`:
+
+```bash
+#!/usr/bin/env bash
+# Usage: agent-run.sh <run-dir>    (inside a loop container, as the node user)
+# One headless Claude Code session on <run-dir>/repo with the prompt in <run-dir>/prompt.txt and the
+# harness mounted read-only at /harness (CLAUDE.md, append-system-prompt.md, skills/). Each run gets
+# its own config dir, so runs share no memory, history, or skills beyond what the harness gives them.
+# The session skips permission prompts: it runs only inside the firewalled container (charter C11).
+# Writes <run-dir>/result.json (Claude Code's JSON result), stderr.txt, exit, wall.
+set -uo pipefail
+d="${1:?usage: agent-run.sh <run-dir>}"
+cd "$d/repo" || exit 2
+cfg="$d/claude-config"
+mkdir -p "$cfg"
+[[ -s /harness/CLAUDE.md ]] && cp /harness/CLAUDE.md "$cfg/CLAUDE.md"
+[[ -d /harness/skills ]] && cp -R /harness/skills "$cfg/skills"
+printf '{"skipWebFetchPreflight": true}\n' > "$cfg/settings.json"
+args=(-p "$(cat "$d/prompt.txt")" --output-format json --max-turns "${OVERNIGHT_MAX_TURNS:-40}"
+  --dangerously-skip-permissions)
+if [[ -s /harness/append-system-prompt.md ]]; then
+  args+=(--append-system-prompt "$(cat /harness/append-system-prompt.md)")
+fi
+args+=(--disallowedTools WebFetch WebSearch)
+start="$(date +%s)"
+CLAUDE_CONFIG_DIR="$cfg" timeout "${OVERNIGHT_RUN_TIMEOUT:-900}" claude "${args[@]}" > "$d/result.json" 2> "$d/stderr.txt"
+echo "$?" > "$d/exit"
+echo "$(( $(date +%s) - start ))" > "$d/wall"
+```
+
+`evals/proposed/README.md`:
+
+```markdown
+# Proposed task families
+
+Written by the overnight loop's eval-author phase (`scripts/overnight.sh start --eval-refresh`), one folder per night. `verdicts.json` records, per task, the baseline pass rate over three tries and `admit` (20% to 80%) or the reason it was rejected. Nothing here is part of the judge until `scripts/overnight.sh admit <date>` copies the admitted tasks into `evals/tasks/dev/`, and a reviewed PR merges them. The held-out set is never changed this way.
+```
+
+`evals/README.md`:
+
+```markdown
+# evals: the overnight loop's frozen judge
+
+Task 31 of the prep-kit plan. Thirty small multi-step coding tasks in six families, run through Claude Code with the team's harness to measure whether a change to that harness helps.
+
+- `tasks/dev/` (18): the loop sees these results every round.
+- `tasks/heldout/` (12): same families, different code; scored once, at the end of a night, to separate real improvement from overfitting to DEV.
+- `runner/judge.sh`: writes a task's fixture, checks a finished run, self-tests a task. It runs in a `--network none` container during the loop and never where an agent runs.
+- `judge.sha256`: the checksum manifest of `tasks/` and `runner/`; `make check` fails when it is stale, and the loop aborts if it changes mid-run.
+- `harness/baseline/`: the starting harness. `prompts/`: the researcher's and the eval author's instructions.
+- `runs/<date>/`: each night's `log.json`, `log.md`, and `best/` (committed); scratch state stays local.
+
+Add or change a task: write the file (see any task for the format), run `evals/selftest.sh`, then `python3 scripts/lib/overnight.py manifest evals > evals/judge.sha256`. A held-out task edited after a night has been scored makes that night's held-out numbers incomparable with later ones: say so in the PR.
+```
+
+- [ ] **Step 9: Write `scripts/overnight.sh`**
+
+```bash
+#!/usr/bin/env bash
+# Usage:
+#   scripts/overnight.sh start [--until 07:00] [--backend vllm|bedrock] [--eval-refresh] [--limit N]
+#                              [--rounds N] [--plateau 4] [--key-file ~/.xenia-overnight-key]
+#   scripts/overnight.sh stop        stop the loop now; the log and report keep what was measured
+#   scripts/overnight.sh status      running or not, rounds done, best so far, the last log lines
+#   scripts/overnight.sh report [<date>]   (re)write evals/runs/<date>/log.md and print its summary
+#   scripts/overnight.sh admit <date>      copy eval-refresh tasks that passed the sanity band into
+#                                          evals/tasks/dev/ (a human step, reviewed by PR; never held-out)
+#
+# The overnight self-improvement loop (Task 31). Runs on Erik's laptop: this script is the scheduler
+# and holds the only AWS credentials (for scripts/gpu.sh tune, between rounds). Every agent session
+# runs in the dev container image behind a gateway-only firewall with the loop's own budgeted key; the
+# judge (evals/tasks, evals/runner) is mounted read-only into a --network none container and nowhere
+# else, and its checksum is verified before every round. Nothing here can push, deploy, or read AWS.
+# Billable: nothing of its own (the key's budget caps tokens; the GPU box is shutdown.d/10-gpu-box.sh).
+# Environment: OVERNIGHT_IMAGE, OVERNIGHT_BASE_URL, OVERNIGHT_REPS (3), OVERNIGHT_BEDROCK_MODEL
+# (qwen3-coder-bedrock), OVERNIGHT_MAX_TURNS (40) and OVERNIGHT_RUN_TIMEOUT (900 s) via agent-run.sh,
+# GPU_PROFILE (for gpu.sh).
+#
+# jq filters below are single-quoted on purpose: their $names are jq variables, not shell ones.
+# shellcheck disable=SC2016
+set -euo pipefail
+source "$(dirname "$0")/lib/common.sh"
+
+lib="$KIT_ROOT/scripts/lib/overnight.py"
+runs="$KIT_ROOT/evals/runs"
+image="${OVERNIGHT_IMAGE:-ghcr.io/ert485/xenia-2026-devcontainer:main}"
+base_url="${OVERNIGHT_BASE_URL:-https://llm.26.cohack.tetl.ca}"
+reps="${OVERNIGHT_REPS:-3}"
+agent_c=xenia-ovn-agent
+judge_c=xenia-ovn-judge
+py="$KIT_ROOT/.venv/bin/python"; [[ -x "$py" ]] || py=python3
+
+usage() { die "usage: overnight.sh start [--until HH:MM] [--backend vllm|bedrock] [--eval-refresh] [--limit N] [--rounds N] [--plateau N] [--key-file F] | stop | status | report [<date>] | admit <date>"; }
+night() { TZ=America/Regina date +%F; }
+current() { cat "$runs/.current" 2>/dev/null || true; }
+alive() { local p; p="$(cat "$runs/$1/state/pid" 2>/dev/null || true)"; [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null; }
+
+# ---- start / stop / status / report / admit -----------------------------------------------------
+
+cmd_start() {
+  local until=07:00 backend=vllm refresh=0 limit=0 rounds=0 plateau=4 keyfile="$HOME/.xenia-overnight-key"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --until) until="${2:?}"; shift 2 ;;
+      --backend) backend="${2:?}"; shift 2 ;;
+      --eval-refresh) refresh=1; shift ;;
+      --limit) limit="${2:?}"; shift 2 ;;
+      --rounds) rounds="${2:?}"; shift 2 ;;
+      --plateau) plateau="${2:?}"; shift 2 ;;
+      --key-file) keyfile="${2:?}"; shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  [[ "$until" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die "--until wants HH:MM (America/Regina), got $until"
+  [[ "$backend" == vllm || "$backend" == bedrock ]] || die "--backend is vllm or bedrock"
+  [[ "$limit" =~ ^[0-9]+$ && "$rounds" =~ ^[0-9]+$ && "$plateau" =~ ^[1-9][0-9]*$ ]] || die "--limit, --rounds, --plateau want numbers"
+  [[ -s "$keyfile" ]] || die "no gateway key in $keyfile (Erik: scripts/gateway-key.sh generate overnight 5 > $keyfile; chmod 600 $keyfile)"
+  [[ "$(stat -f %Lp "$keyfile" 2>/dev/null || stat -c %a "$keyfile")" == 600 ]] || die "$keyfile must be mode 600"
+  local prev; prev="$(current)"
+  if [[ -n "$prev" ]] && alive "$prev"; then die "the loop for $prev is already running (scripts/overnight.sh status)"; fi
+  local date dir
+  date="$(night)"; dir="$runs/$date"
+  [[ ! -f "$dir/log.json" ]] || die "$dir already has a log; move it aside to rerun tonight"
+  mkdir -p "$dir/state"
+  printf 'UNTIL=%s\nBACKEND=%s\nREFRESH=%s\nLIMIT=%s\nROUNDS=%s\nPLATEAU=%s\nKEYFILE=%s\n' \
+    "$until" "$backend" "$refresh" "$limit" "$rounds" "$plateau" "$keyfile" > "$dir/state/config.env"
+  printf '%s\n' "$date" > "$runs/.current"
+  nohup "$0" _loop "$date" > "$dir/state/loop.log" 2>&1 &
+  local pid=$!
+  printf '%s\n' "$pid" > "$dir/state/pid"
+  if command -v caffeinate >/dev/null 2>&1; then caffeinate -dims -w "$pid" & fi
+  log "overnight loop started for the night of $date (pid $pid, ends by $until CST); follow it with: tail -f $dir/state/loop.log"
+}
+
+cmd_stop() {
+  local date; date="$(current)"
+  if [[ -z "$date" ]] || ! alive "$date"; then echo "overnight: not running"; return 0; fi
+  printf 'stopped by overnight.sh stop\n' > "$runs/$date/state/stop"
+  docker rm -f "$agent_c" "$judge_c" xenia-ovn-research xenia-ovn-author >/dev/null 2>&1 || true
+  kill -TERM "$(cat "$runs/$date/state/pid")" 2>/dev/null || true
+  log "stop sent; the loop writes its report and exits (scripts/overnight.sh status)"
+}
+
+cmd_status() {
+  local date; date="$(current)"
+  [[ -n "$date" && -d "$runs/$date" ]] || { echo "overnight: not running (no run yet)"; return 0; }
+  if alive "$date"; then echo "overnight: running (night of $date)"; else echo "overnight: not running (last run: night of $date)"; fi
+  if [[ -f "$runs/$date/log.json" ]]; then
+    jq -r '"rounds: \(.rounds | length), best: \(.best), plateau: \(.plateau_at // "not yet"), stop: \(.stop_reason // "n/a")"' "$runs/$date/log.json"
+  fi
+  tail -n 5 "$runs/$date/state/loop.log" 2>/dev/null || true
+}
+
+cmd_report() {
+  local date="${1:-$(current)}"
+  [[ -f "$runs/$date/log.json" ]] || die "no log for $date"
+  "$py" "$lib" render "$runs/$date/log.json" > "$runs/$date/log.md"
+  sed -n '/^## Summary/,$p' "$runs/$date/log.md"
+  log "wrote $runs/$date/log.md"
+}
+
+cmd_admit() {
+  local date="${1:?usage: overnight.sh admit <date>}" pdir n=0 t
+  pdir="$KIT_ROOT/evals/proposed/$date"
+  [[ -f "$pdir/verdicts.json" ]] || die "no verdicts in $pdir (was the loop run with --eval-refresh?)"
+  while read -r t; do
+    [[ "$t" =~ ^[a-z0-9-]+$ ]] || die "odd task name in verdicts.json: $t"
+    [[ ! -e "$KIT_ROOT/evals/tasks/dev/$t.sh" && ! -e "$KIT_ROOT/evals/tasks/heldout/$t.sh" ]] || die "$t already exists in the judge"
+    cp "$pdir/$t.sh" "$KIT_ROOT/evals/tasks/dev/$t.sh"
+    n=$((n + 1))
+  done < <(jq -r 'to_entries[] | select(.value.verdict == "admit") | .key' "$pdir/verdicts.json")
+  "$py" "$lib" manifest "$KIT_ROOT/evals" > "$KIT_ROOT/evals/judge.sha256"
+  log "admitted $n task(s) into evals/tasks/dev/ and refreshed evals/judge.sha256; run make check, review, and open a PR (held-out untouched)"
+}
+
+# ---- the loop (runs in the background, started by cmd_start) ------------------------------------
+
+sandbox() { # sandbox <name> <docker run mount/env args...>: a firewalled, gateway-only container
+  local name="$1"; shift
+  docker rm -f "$name" >/dev/null 2>&1 || true
+  docker run -d --name "$name" --cap-add NET_ADMIN --cap-add NET_RAW --env-file "$state/agent.env" \
+    -v "$KIT_ROOT/evals/runner:/runner:ro" "$@" "$image" sleep infinity >/dev/null
+  docker exec -u root "$name" bash /runner/strict-egress.sh
+}
+
+judge_up() { # judge_up <tasks-dir>: the --network none judge container over one split
+  docker rm -f "$judge_c" >/dev/null 2>&1 || true
+  docker run -d --name "$judge_c" --network none -v "$KIT_ROOT/evals/runner:/judge/runner:ro" \
+    -v "$1:/judge/tasks:ro" -v "$dir/work:/runs" "$image" sleep infinity >/dev/null
+}
+
+logset() { # logset <jq filter> [jq args...]: edit log.json in place
+  local f="$1"; shift
+  jq "$@" "$f" "$dir/log.json" > "$dir/log.json.new" && mv "$dir/log.json.new" "$dir/log.json"
+}
+
+render() { "$py" "$lib" render "$dir/log.json" > "$dir/log.md"; }
+
+probe_backend() { # prints the deployment that served a one-token request
+  curl -sS -m 30 -D - -o /dev/null "$base_url/v1/chat/completions" -H "Authorization: Bearer $key" \
+    -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$model\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ok\"}]}" \
+    | tr -d '\r' | awk -F': ' 'tolower($1) == "x-litellm-model-id" {print $2}'
+}
+
+tune_to() { # tune_to <knobs.json>: restart vLLM with these knobs unless they are already applied
+  [[ "$BACKEND" == vllm ]] || return 0
+  if [[ -f "$state/applied-knobs.json" ]] && cmp -s <(jq -S . "$1") <(jq -S . "$state/applied-knobs.json"); then return 0; fi
+  log "tuning vLLM: $(jq -c . "$1")"
+  local t0 i; t0="$(date +%s)"
+  "$KIT_ROOT/scripts/gpu.sh" tune "$1" || return 1
+  for ((i = 0; i < 40; i++)); do
+    sleep 30
+    "$KIT_ROOT/scripts/gpu.sh" status 2>/dev/null | grep -q 'vllm: healthy' && break
+  done
+  for ((i = 0; i < 20; i++)); do
+    [[ "$(probe_backend)" == qwen3-coder-vllm ]] && { cp "$1" "$state/applied-knobs.json"; tune_s=$(( $(date +%s) - t0 )); return 0; }
+    sleep 15
+  done
+  return 1
+}
+
+run_round() { # run_round <name> <tasks-dir> <harness-dir>: every task in the split, $reps times
+  local name="$1" tasks="$2" harness="$3" t0 p list
+  rsync -a --delete --exclude .git "$harness/" "$state/harness-current/"
+  mkdir -p "$dir/work/$name"
+  p="$(jq -r .max_num_seqs "$harness/knobs.json")"; [[ "$BACKEND" == vllm ]] || p=4
+  list="$(find "$tasks" -maxdepth 1 -name '*.sh' -exec basename {} .sh \; | sort)"
+  [[ "$LIMIT" == 0 ]] || list="$(printf '%s\n' "$list" | head -n "$LIMIT")"
+  t0="$(date +%s)"
+  local prober=""
+  if [[ "$BACKEND" == vllm ]]; then
+    ( while sleep 60; do probe_backend >> "$dir/work/$name/probe.txt" || true; done ) &
+    prober=$!
+  fi
+  for r in $(seq 1 "$reps"); do printf '%s\n' "$list" | sed "s/\$/ $r/"; done \
+    | xargs -P "$p" -L 1 "$0" _one "$date" "$name" || true
+  [[ -z "$prober" ]] || kill "$prober" 2>/dev/null || true
+  jq -n --argjson w "$(( $(date +%s) - t0 ))" '{wall_s: $w}' > "$dir/work/$name/round.json"
+  last_wall=$(( $(date +%s) - t0 ))
+  # LiteLLM refuses every request once the key's max_budget is spent; half the runs failing that way ends the night.
+  local total hits
+  total=$(( $(printf '%s\n' "$list" | wc -l) * reps ))
+  hits="$(grep -ls 'Budget has been exceeded' "$dir/work/$name"/*/result.json "$dir/work/$name"/*/stderr.txt 2>/dev/null \
+    | sed 's|/[^/]*$||' | sort -u | wc -l | tr -d ' ')"
+  (( hits * 2 < total )) || finish "the key's budget is spent ($hits of $total runs were refused)"
+}
+
+spilled() { [[ -f "$dir/work/$1/probe.txt" ]] && grep -q bedrock "$dir/work/$1/probe.txt"; }
+
+researcher() { # researcher <n>: one proposal, as the working tree of branch round-<n>
+  local n="$1"
+  local rw="$dir/work/researcher-$n" input="$state/researcher-input"
+  git -C "$wt" checkout -q -B "round-$n" best
+  rm -rf "$input"; mkdir -p "$input" "$rw"
+  cp "$dir/log.json" "$input/log.json"
+  "$py" "$lib" digest "$dir/work/$best_dir" > "$input/failures.md"
+  sed "s/{{ROUND}}/$n/g" "$KIT_ROOT/evals/prompts/researcher.md" > "$rw/prompt.txt"
+  # The researcher edits a plain copy of the harness (no .git, so it can't move branches); it sees
+  # no judge and no runs, only /input.
+  rsync -a --delete --exclude .git "$wt/" "$rw/repo/"
+  sandbox xenia-ovn-research -v "$rw:/runs/r" -v "$input:/input:ro" -v "$state/empty-harness:/harness:ro" >/dev/null
+  docker exec xenia-ovn-research bash /runner/agent-run.sh /runs/r || true
+  docker rm -f xenia-ovn-research >/dev/null 2>&1 || true
+  rsync -a --delete --exclude .git --exclude claude-config "$rw/repo/" "$wt/"
+  git -C "$wt" add -A
+  git -C "$wt" -c user.name=overnight -c user.email=overnight commit -qm "round $n" || true
+}
+
+eval_refresh() { # the gated eval-author phase: proposals, self-test, the 20%..80% sanity band
+  local pdir="$KIT_ROOT/evals/proposed/$date" aw="$dir/work/author" ok="$state/proposed-ok" f fam
+  log "plateau: eval-author phase (proposals go to evals/proposed/$date; tonight's judge does not change)"
+  mkdir -p "$pdir" "$aw" "$ok" "$state/author-input"
+  cp "$KIT_ROOT"/evals/tasks/dev/*.sh "$KIT_ROOT/evals/runner/lib.sh" "$state/author-input/"
+  grep -h '^# family: ' "$KIT_ROOT"/evals/tasks/dev/*.sh | sort -u > "$state/author-input/families.txt"
+  cp "$KIT_ROOT/evals/prompts/eval-author.md" "$aw/prompt.txt"
+  sandbox xenia-ovn-author -v "$aw:/runs/a" -v "$pdir:/runs/a/repo" -v "$state/author-input:/input:ro" \
+    -v "$state/empty-harness:/harness:ro" >/dev/null
+  docker exec xenia-ovn-author bash /runner/agent-run.sh /runs/a || true
+  docker rm -f xenia-ovn-author >/dev/null 2>&1 || true
+  local entries="[]" verdict
+  for f in "$pdir"/*.sh; do
+    [[ -f "$f" ]] || continue
+    fam="$(grep -m1 '^# family: ' "$f" || true)"
+    if [[ ! "$(basename "$f" .sh)" =~ ^[a-z0-9-]+$ ]] || [[ -z "$fam" ]] || grep -qxF "$fam" "$state/author-input/families.txt"; then
+      verdict="reject: name, or not a new family"
+    elif docker run --rm --network none -v "$KIT_ROOT/evals/runner:/judge/runner:ro" -v "$pdir:/judge/tasks:ro" \
+        "$image" bash /judge/runner/judge.sh selftest "/judge/tasks/$(basename "$f")" >/dev/null 2>&1; then
+      cp "$f" "$ok/"; continue
+    else
+      verdict="reject: self-test failed"
+    fi
+    entries="$(jq --arg t "$(basename "$f" .sh)" --arg v "$verdict" '. + [{task: $t, selftest: "failed", rate: null, verdict: $v}]' <<< "$entries")"
+  done
+  if compgen -G "$ok/*.sh" >/dev/null; then
+    judge_up "$ok"
+    tune_to "$wt_baseline/knobs.json" || true
+    run_round refresh "$ok" "$wt_baseline"
+    "$py" "$lib" score "$dir/work/refresh" > "$state/refresh-score.json"
+    "$py" "$lib" sanity "$state/refresh-score.json" > "$pdir/verdicts.json"
+    entries="$(jq --slurpfile v "$pdir/verdicts.json" '. + ($v[0] | to_entries | map({task: .key, selftest: "ok", rate: .value.rate, verdict: .value.verdict}))' <<< "$entries")"
+    judge_up "$KIT_ROOT/evals/tasks/dev"
+  fi
+  logset '.eval_refresh_log = $e' --argjson e "$entries"
+  render
+}
+
+finish() { # finish <reason>: record, restore vLLM's defaults, clean up, exit
+  trap - TERM INT
+  local reason="$1"
+  [[ -f "$state/stop" ]] && reason="$(cat "$state/stop")"
+  log "finishing: $reason"
+  docker rm -f "$agent_c" "$judge_c" xenia-ovn-research xenia-ovn-author >/dev/null 2>&1 || true
+  if [[ -f "$dir/log.json" ]]; then
+    logset '.ended = $e | .stop_reason = $r' --arg e "$(TZ=America/Regina date '+%F %H:%M CST')" --arg r "$reason"
+    [[ -n "${wt:-}" ]] && logset '.best_diff = $d' --argjson d "$(git -C "$wt" diff --name-only baseline best | jq -R . | jq -s .)"
+    render
+    if [[ -n "${wt:-}" ]]; then rm -rf "$dir/best" && mkdir -p "$dir/best" && git -C "$wt" archive best | tar -x -C "$dir/best"; fi
+  fi
+  if [[ "$BACKEND" == vllm && -f "$state/applied-knobs.json" ]] \
+    && ! cmp -s <(jq -S . "$state/applied-knobs.json") <(jq -S . "$KIT_ROOT/evals/harness/baseline/knobs.json"); then
+    "$KIT_ROOT/scripts/gpu.sh" model "$("$py" -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["default"])' "$KIT_ROOT/infra/recipes/gpu-box/models.yaml")" || log "WARN could not restore vLLM defaults: run scripts/gpu.sh model <default> by hand"
+  fi
+  rm -f "$state/agent.env" "$state/pid"
+  exit 0
+}
+
+cmd_loop() {
+  date="${1:?}"; dir="$runs/$date"; state="$dir/state"
+  cfg() { sed -n "s/^$1=//p" "$state/config.env"; }
+  UNTIL="$(cfg UNTIL)"; BACKEND="$(cfg BACKEND)"; REFRESH="$(cfg REFRESH)"; LIMIT="$(cfg LIMIT)"
+  ROUNDS="$(cfg ROUNDS)"; PLATEAU="$(cfg PLATEAU)"; KEYFILE="$(cfg KEYFILE)"
+  key="$(tr -d '[:space:]' < "$KEYFILE")"
+  model=qwen3-coder; [[ "$BACKEND" == vllm ]] || model="${OVERNIGHT_BEDROCK_MODEL:-qwen3-coder-bedrock}"
+  last_wall=0; tune_s=900; research_s=600; best_dir=r0b
+  trap 'finish "stopped (signal)"' TERM INT
+
+  # Deadline: at --until, stop whatever is running and write the report.
+  local end now rs0
+  end="$("$py" "$lib" deadline "$UNTIL")"
+  ( sleep "$(( end - $(date +%s) ))"; printf 'deadline %s CST\n' "$UNTIL" > "$state/stop"
+    docker rm -f "$agent_c" "$judge_c" xenia-ovn-research xenia-ovn-author >/dev/null 2>&1; kill -TERM "$$" ) &
+  sleeper=$!
+  trap 'kill "$sleeper" 2>/dev/null || true' EXIT
+
+  log "preflight"
+  require_cmd docker jq curl rsync git
+  docker image inspect "$image" >/dev/null 2>&1 || docker pull -q "$image" >/dev/null \
+    || die "no image $image: pull it (docker login ghcr.io) or build it from templates/devcontainer"
+  "$KIT_ROOT/evals/selftest.sh" > "$state/selftest.txt" 2>&1 || { tail -5 "$state/selftest.txt"; die "the judge fails its self-test"; }
+  "$py" "$lib" manifest "$KIT_ROOT/evals" > "$state/judge.manifest"
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' "$base_url/health/readiness")" == 200 ]] || die "gateway not ready"
+  local served; served="$(probe_backend)"
+  if [[ "$BACKEND" == vllm ]]; then
+    [[ "$served" == qwen3-coder-vllm ]] || die "the gateway served '$served', not qwen3-coder-vllm: start the GPU box first (scripts/gpu.sh start)"
+    aws sts get-caller-identity --profile "${GPU_PROFILE:-cohack}" >/dev/null || die "AWS profile ${GPU_PROFILE:-cohack} not logged in (aws sso login); gpu.sh tune needs it"
+  else
+    [[ -n "$served" ]] || die "the key cannot reach $model"
+  fi
+  umask 077
+  {
+    printf 'ANTHROPIC_BASE_URL=%s\nANTHROPIC_AUTH_TOKEN=%s\n' "$base_url" "$key"
+    for v in ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL; do
+      printf '%s=%s\n' "$v" "$model"
+    done
+    printf 'CLAUDE_CODE_MAX_CONTEXT_TOKENS=110000\nCLAUDE_CODE_MAX_OUTPUT_TOKENS=16000\nCLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n'
+    printf 'OVERNIGHT_MAX_TURNS=%s\nOVERNIGHT_RUN_TIMEOUT=%s\n' "${OVERNIGHT_MAX_TURNS:-40}" "${OVERNIGHT_RUN_TIMEOUT:-900}"
+    printf 'XENIA_IN_CONTAINER=1\nGIT_CONFIG_COUNT=1\nGIT_CONFIG_KEY_0=safe.directory\nGIT_CONFIG_VALUE_0=*\n'
+  } > "$state/agent.env"
+  umask 022
+
+  # The scratch harness repo: branch baseline (never moves), best (moves on keep), round-<n>.
+  wt="$dir/harness"; wt_baseline="$state/baseline"
+  rm -rf "$wt" "$wt_baseline"; mkdir -p "$wt" "$state/harness-current" "$state/empty-harness"
+  cp -R "$KIT_ROOT/evals/harness/baseline/." "$wt/"
+  cp -R "$KIT_ROOT/evals/harness/baseline/." "$wt_baseline/"
+  git -C "$wt" init -q -b baseline
+  git -C "$wt" add -A && git -C "$wt" -c user.name=overnight -c user.email=overnight commit -qm baseline
+  git -C "$wt" branch best
+  best_copy="$state/best"; rm -rf "$best_copy"; cp -R "$wt_baseline" "$best_copy"
+
+  mkdir -p "$dir/work"
+  sandbox "$agent_c" -v "$dir/work:/runs" -v "$state/harness-current:/harness:ro"
+  judge_up "$KIT_ROOT/evals/tasks/dev"
+  local dev_n held_n
+  dev_n="$(find "$KIT_ROOT/evals/tasks/dev" -name '*.sh' | wc -l | tr -d ' ')"
+  held_n="$(find "$KIT_ROOT/evals/tasks/heldout" -name '*.sh' | wc -l | tr -d ' ')"
+  [[ "$LIMIT" == 0 ]] || { dev_n="$LIMIT"; held_n="$LIMIT"; }
+  jq -n --arg d "$date" --arg b "$BACKEND" --arg m "$model" --arg s "$(shasum -a 256 "$state/judge.manifest" | cut -c1-64)" \
+    --argjson dn "$dev_n" --argjson hn "$held_n" --argjson r "$reps" --argjson p "$PLATEAU" --argjson e "$REFRESH" \
+    --arg st "$(TZ=America/Regina date '+%F %H:%M CST')" \
+    '{date: $d, backend: $b, model: $m, judge_sha: $s, dev_tasks: $dn, heldout_tasks: $hn, reps: $r, plateau_n: $p,
+      eval_refresh: ($e == 1), started: $st, ended: null, stop_reason: null, noise: null, best: "baseline",
+      plateau_at: null, rounds: [], heldout: {}, eval_refresh_log: []}' > "$dir/log.json"
+
+  log "baseline, twice (the noise floor)"
+  tune_to "$wt_baseline/knobs.json" || die "could not apply the baseline knobs to vLLM"
+  run_round r0a "$KIT_ROOT/evals/tasks/dev" "$wt_baseline"
+  run_round r0b "$KIT_ROOT/evals/tasks/dev" "$wt_baseline"
+  local sa sb s0
+  sa="$("$py" "$lib" score "$dir/work/r0a")"; sb="$("$py" "$lib" score "$dir/work/r0b")"
+  s0="$("$py" "$lib" score "$dir/work/r0a" "$dir/work/r0b")"
+  logset '.noise = ([($a.mean - $b.mean | fabs), (1 / $a.n_tasks)] | max | . * 10000 | round / 10000)
+          | .rounds += [{round: "baseline", group: "baseline", hypothesis: "baseline (run twice)", score: $s,
+                         decision: "baseline", delta: null, spilled: false}]' \
+    --argjson a "$sa" --argjson b "$sb" --argjson s "$s0"
+  render
+  round_wall="$last_wall"
+
+  local n=0 v group entry sc dec rt ri ro
+  while :; do
+    n=$((n + 1))
+    [[ "$ROUNDS" == 0 || "$n" -le "$ROUNDS" ]] || break
+    now="$(date +%s)"
+    # Stop starting rounds when this one plus the held-out scoring (about 1.4 DEV rounds and two
+    # vLLM restarts) would not fit before the deadline, with ten minutes to spare.
+    if (( now + research_s + round_wall + tune_s + round_wall * 14 / 10 + 2 * tune_s + 600 > end )); then log "no time for round $n"; break; fi
+    "$py" "$lib" manifest "$KIT_ROOT/evals" | cmp -s - "$state/judge.manifest" || finish "the judge changed on disk: run aborted"
+    log "round $n: researcher"
+    rs0="$(date +%s)"
+    researcher "$n"
+    research_s=$(( $(date +%s) - rs0 ))
+    rt="$(jq -r '.result // ""' "$dir/work/researcher-$n/result.json" 2>/dev/null | head -c 300 || true)"
+    ri="$(jq '[.usage.input_tokens, .usage.cache_read_input_tokens, .usage.cache_creation_input_tokens] | map(. // 0) | add' "$dir/work/researcher-$n/result.json" 2>/dev/null || echo 0)"
+    ro="$(jq '.usage.output_tokens // 0' "$dir/work/researcher-$n/result.json" 2>/dev/null || echo 0)"
+    entry="$(jq -n --arg r "round-$n" --arg h "$(head -c 2000 "$wt/HYPOTHESIS.md" 2>/dev/null || true)" \
+      --argjson ri "${ri:-0}" --argjson ro "${ro:-0}" \
+      '{round: $r, hypothesis: $h, researcher_tokens_in: $ri, researcher_tokens_out: $ro, spilled: false, delta: null}')"
+    if ! v="$("$py" "$lib" validate "$best_copy" "$wt")"; then
+      logset '.rounds += [$e + {group: "invalid", decision: "rejected", note: $v.reason}]' --argjson e "$entry" --argjson v "$v"
+      log "round $n rejected: $(jq -r .reason <<< "$v") (researcher said: $rt)"
+      render; continue
+    fi
+    group="$(jq -r .group <<< "$v")"
+    if [[ "$BACKEND" != vllm && "$group" =~ ^(tool_parser|sampling|max_num_seqs)$ ]]; then
+      logset '.rounds += [$e + {group: $g, decision: "rejected", note: "vLLM knobs need --backend vllm"}]' --argjson e "$entry" --arg g "$group"
+      render; continue
+    fi
+    if ! tune_to "$wt/knobs.json"; then
+      logset '.rounds += [$e + {group: $g, decision: "rejected", note: "vLLM did not come back healthy with these knobs"}]' --argjson e "$entry" --arg g "$group"
+      tune_to "$best_copy/knobs.json" || finish "vLLM does not come back healthy"
+      render; continue
+    fi
+    log "round $n: $group, DEV x$reps"
+    run_round "r$n" "$KIT_ROOT/evals/tasks/dev" "$wt"
+    round_wall="$last_wall"
+    sc="$("$py" "$lib" score "$dir/work/r$n")"
+    if spilled "r$n"; then
+      dec="$("$py" "$lib" decide "$dir/log.json" <(printf '%s' "$sc") "$group" --spilled)"
+    else
+      dec="$("$py" "$lib" decide "$dir/log.json" <(printf '%s' "$sc") "$group")"
+    fi
+    logset '.rounds += [$e + {group: $g, score: $s, decision: $d.decision, delta: $d.delta, note: $d.reason, spilled: ($d.decision == "void")}]' \
+      --argjson e "$entry" --arg g "$group" --argjson s "$sc" --argjson d "$dec"
+    if [[ "$(jq -r .decision <<< "$dec")" == keep ]]; then
+      git -C "$wt" branch -f best "round-$n"
+      rm -rf "$best_copy"; mkdir -p "$best_copy"; git -C "$wt" archive best | tar -x -C "$best_copy"
+      logset '.best = $b' --arg b "round-$n"
+      best_dir="r$n"
+    fi
+    log "round $n: $(jq -r '"\(.decision) (\(.reason))"' <<< "$dec")"
+    if [[ "$(jq -r .plateau_at "$dir/log.json")" == null && "$("$py" "$lib" streak "$dir/log.json")" -ge "$PLATEAU" ]]; then
+      logset '.plateau_at = $r' --arg r "round-$n"
+      [[ "$REFRESH" == 1 ]] && eval_refresh
+    fi
+    render
+  done
+
+  log "held-out scoring: baseline, then best"
+  judge_up "$KIT_ROOT/evals/tasks/heldout"
+  tune_to "$wt_baseline/knobs.json" || true
+  run_round heldout-baseline "$KIT_ROOT/evals/tasks/heldout" "$wt_baseline"
+  logset '.heldout.baseline = $s' --argjson s "$("$py" "$lib" score "$dir/work/heldout-baseline")"
+  if [[ "$(jq -r .best "$dir/log.json")" != baseline ]]; then
+    tune_to "$best_copy/knobs.json" || true
+    run_round heldout-best "$KIT_ROOT/evals/tasks/heldout" "$best_copy"
+    logset '.heldout.best = $s | .heldout.best_round = .best' --argjson s "$("$py" "$lib" score "$dir/work/heldout-best")"
+  fi
+  finish "done"
+}
+
+cmd_one() { # _one <date> <round> <task> <rep>: one run (fixture, agent session, check), for xargs
+  local date="$1" name="$2" task="$3" rep="$4" w c pass=false err="" rc
+  w="$runs/$date/work/$name/$task.$rep"; c="/runs/$name/$task.$rep"
+  mkdir -p "$w"
+  if ! docker exec "$judge_c" bash /judge/runner/judge.sh fixture "/judge/tasks/$task.sh" "$c/repo" > "$w/fixture.txt" 2>&1; then
+    err=fixture
+  else
+    docker exec "$judge_c" bash /judge/runner/judge.sh prompt "/judge/tasks/$task.sh" > "$w/prompt.txt"
+    docker exec "$agent_c" bash /runner/agent-run.sh "$c" || true
+    rc="$(cat "$w/exit" 2>/dev/null || echo 1)"
+    if docker exec "$judge_c" bash /judge/runner/judge.sh check "/judge/tasks/$task.sh" "$c/repo" > "$w/check.txt" 2>&1; then pass=true; fi
+    if [[ "$rc" == 124 ]]; then err=timeout
+    elif ! jq -e . "$w/result.json" >/dev/null 2>&1; then err="no result"
+    elif [[ "$(jq -r .is_error "$w/result.json")" == true ]]; then err="$(jq -r '.subtype // "error"' "$w/result.json")"
+    fi
+  fi
+  jq -n --arg t "$task" --argjson r "$rep" --argjson p "$pass" --arg e "$err" \
+    --argjson wall "$(cat "$w/wall" 2>/dev/null || echo 0)" \
+    --slurpfile res <(jq -c . "$w/result.json" 2>/dev/null || echo '{}') \
+    '($res[0] // {}) as $x | {task: $t, rep: $r, pass: $p, error: (if $e == "" then null else $e end), wall: $wall,
+      turns: ($x.num_turns // null), result: (($x.result // "") | tostring | .[0:600]),
+      tokens_in: ([$x.usage.input_tokens, $x.usage.cache_read_input_tokens, $x.usage.cache_creation_input_tokens] | map(. // 0) | add),
+      tokens_out: ($x.usage.output_tokens // 0)}' > "$w/run.json"
+}
+
+action="${1:-}"; [[ -n "$action" ]] || usage; shift
+case "$action" in
+  start) cmd_start "$@" ;;
+  stop) cmd_stop ;;
+  status) cmd_status ;;
+  report) cmd_report "$@" ;;
+  admit) cmd_admit "$@" ;;
+  _loop) cmd_loop "$@" ;;
+  _one) cmd_one "$@" ;;
+  *) usage ;;
+esac
+```
+
+- [ ] **Step 10: Makefile, `.gitignore`, tests green, commit**
+
+In the `Makefile`: `check` gains `evals` at the end of its prerequisites; add the target
+
+```make
+evals:
+	evals/selftest.sh
+```
+
+(`.PHONY` too, if the Makefile declares one); `SCRIPTS` gains `evals/runner evals/selftest.sh` in its `find` (the task files are sourced, not executed, and carry no shebang, so they stay out of `shellcheck`); the `leak` target's path list gains `evals`.
+
+Append to `.gitignore`:
+
+```gitignore
+# overnight loop (Task 31): scratch state stays local; log.json, log.md, and best/ are committed
+evals/runs/.current
+evals/runs/*/state/
+evals/runs/*/work/
+evals/runs/*/harness/
+```
+
+```bash
+chmod +x scripts/overnight.sh evals/runner/*.sh evals/selftest.sh
+python3 scripts/lib/overnight.py manifest evals > evals/judge.sha256
+bats tests/overnight.bats tests/gpu.bats && make check
+git checkout -b should/overnight-loop
+git add scripts/overnight.sh scripts/lib/overnight.py scripts/gpu.sh tests/overnight.bats evals Makefile .gitignore
+git commit -m "Add the overnight self-improvement loop: frozen judge, one-idea rounds, gpu.sh tune, research log"
+```
+Expected: `tests/overnight.bats` 21 tests, 0 failures; `make check: OK` (the `evals` target prints `evals selftest: OK (18 dev, 12 held-out)`; `shellcheck` is clean on the new scripts; the leak check passes: the tasks carry no email addresses, IPs, or long numbers).
+
+- [ ] **Step 11: Isolation and harness-wiring proof (Friday afternoon, live)**
+
+Needs Docker on the laptop and the dev container image. First the firewall and what a loop container can and can't see, with no key at all:
+
+```bash
+image=ghcr.io/ert485/xenia-2026-devcontainer:main
+docker pull -q "$image"
+docker run -d --name xenia-ovn-probe --cap-add NET_ADMIN --cap-add NET_RAW -v "$PWD/evals/runner:/runner:ro" "$image" sleep infinity
+docker exec -u root xenia-ovn-probe bash /runner/strict-egress.sh
+docker exec xenia-ovn-probe bash -c '
+  curl -sS -m 5 -o /dev/null https://api.github.com/zen; echo "github: exit $?"
+  curl -sS -m 5 -o /dev/null https://registry.npmjs.org/; echo "npm: exit $?"
+  curl -s -o /dev/null -w "gateway: %{http_code}\n" https://llm.26.cohack.tetl.ca/health/readiness
+  ls /judge 2>&1; echo "workspace entries: $(ls -A /workspace 2>/dev/null | wc -l)"
+  aws sts get-caller-identity 2>&1 | tail -1
+  gh auth status 2>&1 | tail -1'
+docker rm -f xenia-ovn-probe
+```
+Expected: `strict-egress: only llm.26.cohack.tetl.ca is reachable`; `github: exit 28` or `exit 7`, the same for npm (not 0); `gateway: 200`; `ls` reports `/judge` missing and `workspace entries: 0` (no kit checkout); `aws` ends in `Unable to locate credentials`; `gh` says no host is logged in. Any `exit 0` for GitHub means the held-out set is readable from inside the loop: stop and fix `strict-egress.sh` before going on.
+
+Then, once step 12 has issued the dry-run key, prove the harness reaches the session (per-run `CLAUDE_CONFIG_DIR`, user-level `CLAUDE.md` and skills), against Bedrock:
+
+```bash
+w="$(mktemp -d)"; mkdir -p "$w/repo" "$w/h/skills/kiwi"
+printf 'Agent: end every final answer with the word PINEAPPLE.\n' > "$w/h/CLAUDE.md"
+printf -- '---\nname: kiwi-check\ndescription: Use when asked which skills you have.\n---\nAnswer KIWI.\n' > "$w/h/skills/kiwi/SKILL.md"
+printf 'Agent: say hello, then list the names of the skills available to you.\n' > "$w/prompt.txt"
+( umask 077
+  printf 'ANTHROPIC_BASE_URL=https://llm.26.cohack.tetl.ca\nANTHROPIC_AUTH_TOKEN=%s\n' "$(cat ~/.xenia-overnight-dry-key)"
+  for v in ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL; do
+    printf '%s=qwen3-coder-bedrock\n' "$v"; done
+  printf 'CLAUDE_CODE_MAX_CONTEXT_TOKENS=110000\nCLAUDE_CODE_MAX_OUTPUT_TOKENS=16000\nCLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n' ) > "$w/env"
+docker run -d --name xenia-ovn-wire --cap-add NET_ADMIN --cap-add NET_RAW --env-file "$w/env" \
+  -v "$PWD/evals/runner:/runner:ro" -v "$w:/runs/w" -v "$w/h:/harness:ro" "$image" sleep infinity
+docker exec -u root xenia-ovn-wire bash /runner/strict-egress.sh
+docker exec xenia-ovn-wire bash /runner/agent-run.sh /runs/w
+jq -r '.result' "$w/result.json"; cat "$w/exit"
+docker rm -f xenia-ovn-wire; rm -rf "$w"
+```
+Expected: the answer names `kiwi-check` and ends with `PINEAPPLE`; `exit` is `0`. If `PINEAPPLE` is missing, Claude Code is not reading `CLAUDE.md` from `CLAUDE_CONFIG_DIR`: change `agent-run.sh` to copy the harness `CLAUDE.md` into the run's repo root instead (and exclude it in every task's `unchanged` list; none of them names `CLAUDE.md`), rerun, and record which one worked. If the call is refused with a model-access error, the key can't call `qwen3-coder-bedrock` by name: use `qwen3-coder` with the GPU box stopped (the gateway fails over to Bedrock), and set `OVERNIGHT_BEDROCK_MODEL=qwen3-coder` for step 13. Record both results in `docs/proofs/2026-09-25-overnight-dry-run.md`.
+
+- [ ] **Step 12: STOP: Erik issues the loop's keys**
+
+Two keys, each with its own budget, delivered to files only Erik's user can read (the loop reads them; they never reach a commit or a log):
+
+```bash
+( umask 077; scripts/gateway-key.sh generate overnight-dry 2 > ~/.xenia-overnight-dry-key )
+( umask 077; scripts/gateway-key.sh generate overnight 5 > ~/.xenia-overnight-key )
+ls -l ~/.xenia-overnight-dry-key ~/.xenia-overnight-key
+```
+Expected: two files, `-rw-------`, each one `sk-` line. $5 covers the night's Bedrock exposure: the loop's own traffic is on vLLM, and a spilled round is void anyway.
+
+- [ ] **Step 13: Dry run against Bedrock, three tasks (Friday afternoon, after Task 22 step 7)**
+
+Cheap and quick: three DEV and three held-out tasks, one researcher round, on Bedrock, so no vLLM restart and no GPU needed.
+
+```bash
+scripts/overnight.sh start --backend bedrock --limit 3 --rounds 1 --key-file ~/.xenia-overnight-dry-key
+sleep 120 && scripts/overnight.sh status
+```
+Wait for it (about 30 to 45 minutes: 27 DEV runs and 9 or 18 held-out runs at four in parallel), checking `scripts/overnight.sh status` now and then. Then:
+
+```bash
+d="evals/runs/$(TZ=America/Regina date +%F)"
+scripts/overnight.sh report
+jq '{stop_reason, noise, best, rounds: [.rounds[] | {round, group, decision}], heldout_runs: .heldout.baseline.runs}' "$d/log.json"
+ls "$d/best" && git -C "$d/harness" branch --list
+docker ps --filter name=xenia-ovn --format '{{.Names}}' | wc -l
+```
+Expected: `stop_reason: "done"`; `rounds` holds `baseline` and `round-1` (group one of the six, decision `keep`, `drop`, or `rejected` with its reason; a `rejected` round still proves the path, since the next night has many rounds); `heldout_runs: 9`; `best/` holds `knobs.json` and `HYPOTHESIS.md`; the scratch repo shows `baseline`, `best`, and `round-1`; `0` loop containers left. `log.md` renders the rounds table and the summary.
+
+Then the two failure paths, both cheap:
+
+```bash
+mv "$d" "$d-dry"
+scripts/overnight.sh start --backend bedrock --limit 1 --rounds 2 --key-file ~/.xenia-overnight-dry-key
+sleep 240; printf '# touched\n' >> evals/tasks/dev/answer-01.sh
+until ! scripts/overnight.sh status | grep -q '^overnight: running'; do sleep 30; done
+jq -r .stop_reason "$d/log.json"; git checkout evals/tasks/dev/answer-01.sh
+mv "$d" "$d-tamper"
+scripts/overnight.sh start --backend bedrock --limit 1 --key-file ~/.xenia-overnight-dry-key
+sleep 150 && scripts/overnight.sh stop && sleep 30 && scripts/overnight.sh status
+docker ps --filter name=xenia-ovn --format '{{.Names}}' | wc -l
+mv "$d" "$d-stop"
+```
+Expected: the touched judge ends the second run with `the judge changed on disk: run aborted` before round 1 (the edit lands while the baseline runs; if the baseline finished first, the abort comes before round 2); `overnight.sh stop` leaves `overnight: not running`, `stop: stopped by overnight.sh stop` in the status line, and `0` containers. Write `docs/proofs/2026-09-25-overnight-dry-run.md`: the step 11 results, the dry run's rounds table from `log.md`, its wall time and tokens, the two failure-path lines, and the key's spend as `scripts/gateway-key.sh list` reports it. Keep `evals/runs/*-dry*`, `*-tamper`, `*-stop` local (delete them after the night).
+
+- [ ] **Step 14: Commit the proof and merge; then the night**
+
+```bash
+scripts/ci/leak-check.sh docs/proofs/2026-09-25-overnight-dry-run.md
+git add docs/proofs/2026-09-25-overnight-dry-run.md
+git commit -m "Record the overnight loop's dry run on Bedrock"
+git push -u origin should/overnight-loop
+gh pr create --title "Should tier: overnight self-improvement loop on the idle GPU box" --body "$(printf 'A frozen judge (18 DEV and 12 held-out coding tasks with hidden checks), a scheduler that changes one harness knob per round and keeps it only above measured noise, gpu.sh tune for the vLLM knobs, and a research log with a morning summary. Dry run on Bedrock recorded.\n\nRule-feedback: none\nShutdown: none needed because the only billable thing the loop starts is the GPU box, already covered by shutdown.d/10-gpu-box.sh; overnight.sh stop is its off switch, its containers run on the laptop, and its tokens are capped by the key budget\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
+gh pr checks --watch && gh pr merge --squash --delete-branch
+git checkout main && git pull -q
+```
+Expected: the leak check prints nothing; `check` and `shutdown-coverage` green; merged. The laptop runs the night from `main`.
+
+Once Task 22 step 20 has stopped the GPU box: the scheduler host on power and set not to sleep for the whole window (the script holds `caffeinate -dims` while the loop runs), a fresh `aws sso login` for the `cohack` profile (the scheduler needs it for `gpu.sh tune` until the loop ends), then:
+
+```bash
+scripts/gpu.sh start && sleep 600 && scripts/gpu.sh status
+curl -sS -D - -o /dev/null https://llm.26.cohack.tetl.ca/v1/chat/completions -H "Authorization: Bearer $(cat ~/.xenia-overnight-key)" \
+  -H 'Content-Type: application/json' -d '{"model":"qwen3-coder","max_tokens":1,"messages":[{"role":"user","content":"ok"}]}' | grep -i x-litellm-model-id
+```
+Expected: `vllm: healthy`, `MAX_NUM_SEQS=` the load test's value; `x-litellm-model-id: qwen3-coder-vllm`.
+
+At 23:00:
+
+```bash
+scripts/overnight.sh start
+sleep 3000 && scripts/overnight.sh status
+```
+Expected: `overnight loop started for the night of 2026-09-25 (..., ends by 07:00 CST)`; at 23:50 the status shows the baseline recorded (`rounds: 1`) and round 1 under way. A DEV round is 54 runs at `max_num_seqs` in parallel, about 20 to 35 minutes plus the researcher's few minutes and a vLLM restart when a round changes a vLLM knob; expect 8 to 14 rounds before the loop stops starting new ones (around 05:00 to 05:30, leaving time for held-out scoring) and finishes by 07:00.
+
+- [ ] **Step 15: Saturday 07:00: the morning report**
+
+```bash
+scripts/overnight.sh status
+scripts/overnight.sh report
+scripts/gpu.sh status
+d=evals/runs/2026-09-25
+scripts/ci/leak-check.sh "$d/log.md" "$d/log.json" "$d/best"
+```
+Expected: `not running`, `stop: done` (or `deadline 07:00 CST` if held-out scoring was cut short: then the held-out lines read `not scored` and the report says so); the summary prints; `gpu.sh status` shows `vllm: healthy` with the defaults back (the loop's last act); the leak check prints nothing (the best harness is model-written text: read it before committing).
+
+Write `docs/proofs/2026-09-26-overnight-loop.md`:
+
+```markdown
+# Overnight loop, night of 2026-09-25 (Task 31)
+
+These numbers measure this kit's harness with Qwen3-Coder-30B (AWQ 4-bit) behind Claude Code's gateway mode, which Anthropic does not support, on 30 small tasks written for this kit; they say nothing about Claude models, Claude Code with Claude, or Qwen generally.
+
+- Ran <start> to <end> CST on vLLM, `qwen3-coder` (<model repo>), with its own $5 key; the key's spend: $<x>. Rounds: <n> (<k> kept, <d> dropped, <v> void, <r> rejected). Stop reason: <reason>.
+- Judge: 18 DEV and 12 held-out tasks, checksum `<first 12 hex of the log's judge_sha>`, verified unchanged before every round.
+- Noise floor: <x> points (the baseline run twice).
+
+## DEV curve
+
+<the Rounds table from evals/runs/2026-09-25/log.md>
+
+## Findings
+
+- What helped: <kept rounds, one line each, with the gain>
+- What didn't: <by knob group>
+- Plateau: <reached at round n / not reached>; best harness `<round>`.
+- Held-out: baseline <x>, best <y>; DEV gain <a> points against held-out gain <b> points: <carries over / overfit>.
+- Self-improves or ceiling: <one paragraph, in plain words>.
+
+## Saturday defaults
+
+<step 16's decisions: adopted, or not and why>
+```
+
+```bash
+git checkout -b should/overnight-loop-night
+git add docs/proofs/2026-09-26-overnight-loop.md "$d/log.json" "$d/log.md" "$d/best"
+git commit -m "Record the first overnight loop: DEV curve, plateau, held-out check"
+```
+
+- [ ] **Step 16: STOP: Erik decides the Saturday defaults (before 08:00)**
+
+A change is a candidate only if the held-out gain is at least half its DEV gain (the report says so per night); otherwise the defaults stay as shipped, and that is a finding, not a failure. For each kept change in `evals/runs/2026-09-25/best/`:
+
+| Knob group | Where it becomes the Saturday default |
+|---|---|
+| `claude_md` | appended to `templates/team-repo/CLAUDE.md` under `## Working with the local model` (what every team repo loads), then `scripts/onboard-repo.sh`'s kit-sync to the team repos |
+| `system_prompt` | folded into the same `CLAUDE.md` section: the dev container has no persistent setting for an appended system prompt |
+| `skills` | copied to `plugin/skills/<name>/SKILL.md`, then `make sync-plugin` |
+| `tool_parser`, `max_num_seqs` | `infra/recipes/gpu-box/models.yaml`'s default entry, then `scripts/gpu.sh model <default>` |
+| `sampling` | `scripts/gpu.sh tune evals/runs/2026-09-25/best/knobs.json` after runbook 06's `gpu.sh start` (`models.yaml`'s `extra_args` can't carry JSON through `gpu.sh model`'s character check); add the line to runbook 06 |
+
+Adopted defaults are part of the pre-existing kit and are disclosed with it: the pitch and the idea-lock script (D29) say the kit's agent defaults were tuned by an automated loop before the event, and the same caveat line as the proof file goes at the top of the committed `log.md`.
+
+Each adoption goes in the same branch as step 15, the PR says which rounds it adopts and their DEV and held-out numbers, then:
+
+```bash
+make check && git push -u origin should/overnight-loop-night
+gh pr create --title "Overnight loop results and the Saturday defaults they justify" --body "$(printf '<what was adopted and why, with the held-out numbers; or: nothing adopted, the defaults stay>\n\nRule-feedback: none\nShutdown: none needed because this records results and changes guidance or vLLM settings only\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)')"
+gh pr checks --watch && gh pr merge --squash --delete-branch
+```
+
+- [ ] **Step 17: Eval refresh (a later night, only if the first night plateaued)**
+
+Off the first night on purpose. On a later idle night (the GPU box runs through the event, so any night nobody is using it):
+
+```bash
+scripts/overnight.sh start --eval-refresh
+```
+Expected, in the morning: `log.md` has an `Eval refresh` section listing each proposed task with its self-test result, baseline pass rate, and verdict; `evals/proposed/<date>/verdicts.json` holds the same. The night's DEV and held-out judge did not change (`evals/judge.sha256` unchanged, and the loop would have aborted otherwise). Then, as a reviewed change:
+
+```bash
+scripts/overnight.sh admit <date>
+evals/selftest.sh && make check
+git checkout -b should/evals-refresh-<date>
+git add evals/tasks/dev evals/judge.sha256 evals/proposed/<date>
+git commit -m "Add the eval-refresh tasks that passed the 20 to 80 percent sanity band"
+```
+Expected: `admitted <n> task(s) into evals/tasks/dev/`; `evals/tasks/heldout/` untouched; the self-test passes with more than 18 DEV tasks. Read every admitted task before the PR: a check that can be passed by editing a test is the failure to look for. The next night starts from a fresh baseline measurement anyway, since the DEV set changed.
 
 # Phase 3: Cut tier (documented only)
 
