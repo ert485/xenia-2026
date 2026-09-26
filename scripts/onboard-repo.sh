@@ -142,11 +142,10 @@ cp "$KIT_ROOT/templates/opencode/opencode.json" .devcontainer/opencode.json
 image="ghcr.io/$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')-devcontainer:main"
 sed -i.bak "s|ghcr.io/ert485/xenia-2026-devcontainer:main|$image|" .devcontainer/devcontainer.json && rm -f .devcontainer/devcontainer.json.bak
 rm -rf plugin && cp -R "$KIT_ROOT/plugin" plugin
-# Copy the new paths for skills and README
-mkdir -p .claude
-cp -R "$KIT_ROOT/templates/team-repo/.claude/skills" .claude/
-# README.md only when the repo has none yet or still has the one-line README that gh repo create writes.
-if [[ ! -f README.md ]] || [[ "$(wc -l < README.md)" -le 2 ]]; then
+if [[ -d "$KIT_ROOT/templates/team-repo/.claude/skills" ]]; then
+  mkdir -p .claude && cp -R "$KIT_ROOT/templates/team-repo/.claude/skills" .claude/
+fi
+if [[ -f "$KIT_ROOT/templates/team-repo/README.md" && ! -f README.md ]]; then
   cp "$KIT_ROOT/templates/team-repo/README.md" README.md
 fi
 cp "$KIT_ROOT/shutdown.d/README.md" shutdown.d/README.md
