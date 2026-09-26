@@ -1,0 +1,7 @@
+# Redocly CLI v1 config: the recommended ruleset, with one rule relaxed until the app has auth.
+extends:
+  - recommended
+rules:
+  # The starter API has no authentication yet. Turn this back on (delete the line) when you add a
+  # securitySchemes entry, so every operation must declare its security.
+  security-defined: off
