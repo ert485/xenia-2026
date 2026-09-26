@@ -112,6 +112,14 @@ else
 fi
 aws_() { aws --profile "$profile" --region "$region" "$@"; }
 
+# gpu_alarm_actions <enable|disable> <profile>: the metrics-missing alarm fires on a stopped box, so stop
+# silences both GPU alarms and start re-arms them. Never fatal: the alarms are Should tier.
+gpu_alarm_actions() {
+  aws cloudwatch "$1-alarm-actions" --region us-east-1 --profile "$2" \
+    --alarm-names xenia-gpu-box-unhealthy xenia-gpu-box-metrics-missing 2>/dev/null \
+    || log "could not $1 the GPU alarms (not applied yet?)"
+}
+
 instance() {
   aws_ ec2 describe-instances \
     --filters Name=tag:xenia-role,Values=gpu-box Name=instance-state-name,Values=pending,running,stopping,stopped \
@@ -158,6 +166,7 @@ case "$action" in
   start)
     aws_ ec2 start-instances --instance-ids "$id" >/dev/null
     aws_ ec2 wait instance-running --instance-ids "$id"
+    gpu_alarm_actions enable "$profile"
     log "GPU box running; waiting for vLLM to report healthy (up to 20 minutes on a first boot that has to download weights; a warm reboot is much faster)"
     if wait_for_vllm_health; then
       log "vLLM healthy"
@@ -168,6 +177,7 @@ case "$action" in
     "$KIT_ROOT/scripts/box.sh" xenia-gateway Action=update
     ;;
   stop)
+    gpu_alarm_actions disable "$profile"
     aws_ ec2 stop-instances --instance-ids "$id" >/dev/null
     log "GPU box stopping; updating the gateway now so it fails over to Bedrock immediately instead of waiting on a future request to notice"
     "$KIT_ROOT/scripts/box.sh" xenia-gateway Action=update

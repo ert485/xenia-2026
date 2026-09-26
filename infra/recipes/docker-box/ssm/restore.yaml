@@ -1,0 +1,18 @@
+schemaVersion: "2.2"
+description: Restore a pg_dumpall backup from the backup bucket into a Postgres container on the Docker box (scripts/restore.sh).
+parameters:
+  Key:
+    type: String
+    description: Key under the backup bucket, <host>/<container>/<UTC stamp>.sql.gz
+    allowedPattern: "^[A-Za-z0-9._/-]+\\.sql\\.gz$"
+  Container:
+    type: String
+    description: Running Postgres container, for example app-db-1 or gateway-postgres-1
+    allowedPattern: "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+mainSteps:
+  - action: aws:runShellScript
+    name: restore
+    inputs:
+      timeoutSeconds: "1800"
+      runCommand:
+        - /srv/kit/infra/recipes/docker-box/box/restore.sh "{{ Key }}" "{{ Container }}"
