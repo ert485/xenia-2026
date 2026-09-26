@@ -6,12 +6,12 @@
 # cost-when-running: shares the Docker box (no extra cost)
 set -euo pipefail
 kit="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-profile="${BOX_PROFILE:-cohack}"
+profile="${KIT_PROFILE:-cohack}"
 
 running="$(aws ec2 describe-instances --profile "$profile" --region ca-central-1 \
   --filters Name=tag:xenia-role,Values=docker-box Name=instance-state-name,Values=running \
   --query 'Reservations[].Instances[].InstanceId' --output text)"
-if [[ -z "$running" ]]; then
+if [[ -z "$running" || "$running" == "None" ]]; then
   # 20-docker-box.sh runs first, so on a full shutdown the box is already stopped; the previews
   # stopped with it, and scripts/startup.sh removes them when the box comes back.
   echo "nothing running: the Docker box is stopped"

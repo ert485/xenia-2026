@@ -36,6 +36,13 @@ compose() {
   [[ "$output" == *"service web: pid: host"* ]]
 }
 
+@test "cap_add NET_ADMIN is refused" {
+  compose 'cap_add: [NET_ADMIN]'
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"service web: cap_add NET_ADMIN"* ]]
+}
+
 @test "the Docker socket is refused" {
   compose 'volumes:' '  - /var/run/docker.sock:/var/run/docker.sock'
   run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
@@ -85,6 +92,14 @@ compose() {
   run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
   [ "$status" -eq 1 ]
   [[ "$output" == *"top-level volume db: explicit name"* ]]
+}
+
+@test "an external top-level secret is refused" {
+  compose 'secrets: [dbpass]'
+  printf 'secrets:\n  dbpass:\n    external: true\n' >> "$PROJ/compose.yml"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"top-level secret dbpass: external secrets are not allowed"* ]]
 }
 
 @test "build with host networking is refused" {

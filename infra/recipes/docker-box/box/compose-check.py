@@ -29,7 +29,7 @@ for _tag in ("!reset", "!override"):
     Loader.add_constructor(_tag, _passthrough)
 
 DANGEROUS_CAPS = {"ALL", "SYS_ADMIN", "SYS_MODULE", "SYS_RAWIO", "SYS_PTRACE", "SYS_BOOT",
-                  "DAC_READ_SEARCH", "BPF", "PERFMON"}
+                  "DAC_READ_SEARCH", "BPF", "PERFMON", "NET_ADMIN"}
 HOST_NAMESPACE_KEYS = ("network_mode", "pid", "ipc", "uts", "userns_mode", "cgroup")
 
 
@@ -166,7 +166,12 @@ def check_top_level(reasons, doc, project_dir):
             reasons.append(f"top-level volume {name}: driver_opts (a bind mount in disguise)")
     for section in ("secrets", "configs"):
         for name, item in (doc.get(section) or {}).items():
-            if isinstance(item, dict) and "file" in item:
+            item = item or {}
+            if not isinstance(item, dict):
+                continue
+            if truthy(item.get("external", False)):
+                reasons.append(f"top-level {section[:-1]} {name}: external {section} are not allowed")
+            if "file" in item:
                 check_path(reasons, f"top-level {section[:-1]} {name}", "file", str(item["file"]), project_dir)
 
 
