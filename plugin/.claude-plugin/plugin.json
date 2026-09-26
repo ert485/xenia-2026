@@ -1,0 +1,12 @@
+{
+  "name": "xenia-kit",
+  "version": "0.1.0",
+  "description": "Co.Hack 2026 kit: team rules on session start, /pain, /rule-feedback, /notify, /doctor, /preview, /shutdown-entry, /demo-checklist",
+  "author": {
+    "name": "Erik Tetland"
+  },
+  "homepage": "https://github.com/ert485/xenia-2026",
+  "repository": "https://github.com/ert485/xenia-2026",
+  "license": "MIT",
+  "keywords": ["hackathon", "principles", "skills"]
+}

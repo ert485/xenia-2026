@@ -55,4 +55,19 @@ if [[ -x "$root/plugin/scripts/doctor.sh" ]]; then
     "$root/plugin/scripts/doctor.sh"
   ) || echo "postCreate: doctor reported problems; open a terminal and run /doctor in claude" >&2
 fi
+
+# fix-round-2: CLAUDE_CODE_PLUGIN_SEED_DIR (Dockerfile) alone is not enough -- Claude Code needs the
+# plugin to come from a marketplace, or it reports "No plugins installed" and no hook ever runs.
+# The Dockerfile also writes /opt/xenia/plugins/.claude-plugin/marketplace.json for exactly this.
+# Never fails postCreate.sh itself; documented in plugin/README.md.
+if command -v claude >/dev/null 2>&1; then
+  if claude plugin list 2>/dev/null | grep -q xenia-kit; then
+    :
+  elif claude plugin marketplace add /opt/xenia/plugins >/dev/null 2>&1 \
+    && claude plugin install xenia-kit@xenia >/dev/null 2>&1; then
+    echo "postCreate: installed the xenia-kit plugin from its marketplace (the seed directory was not picked up)"
+  else
+    echo "postCreate: WARNING: the kit plugin (team rules, Stop hook and deny hooks) is not active; run /doctor" >&2
+  fi
+fi
 echo "postCreate: done. Teammate: open a new terminal, then run claude."

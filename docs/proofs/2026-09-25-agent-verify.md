@@ -289,6 +289,7 @@ a time on the Mac, natively, for `org`, `platform`, `recipes/docker-box`, and `r
 and the full, unmodified `make check` passes end to end natively on the Mac once disk headroom
 exists (see below) — so the container's tool additions and firewall/gitignore changes are not the
 blocker; the shared host's free disk is.
+Update 2026-09-26: completed, see "Dev container: full make check (2026-09-26)" below.
 
 ## Mac `make check` (native), full run
 
@@ -327,3 +328,33 @@ deterministic `blocked` verdict (`proofs-unbacked`, `empty-files`, `make-check` 
 `failure-hiding` warning), never reads `REPORT.md`, and writes `.agent/STATUS.json` for a Stop hook
 or CI job to consume in a later task. The dev container image carries the same test tools the Mac
 uses, with two portability bugs found and fixed along the way (see Step 6 above).
+
+## Dev container: full make check (2026-09-26)
+
+On 2026-09-26 (UTC), after the host disk was freed and Docker Desktop restarted, the dev container
+image was rebuilt from a clean clone of the merged verifier branch at commit 10311fa (the code PR 9 merged)
+using `BUILDX_BUILDER=desktop-linux docker build -f templates/devcontainer/Dockerfile -t xenia-devcontainer:task32 .`,
+and the full `make check` was run inside it with `docker run --rm -v "$PWD":/workspace -w /workspace xenia-devcontainer:task32 bash -lc 'bats --version; shellcheck --version | head -2; actionlint -version | head -1; zizmor --version; mkdocs --version; python3 -c "import segno, yaml; print(\"segno\", segno.__version__)"; time make check'`,
+exiting with code 0. This closes the earlier gap.
+
+```
+Bats 1.8.2
+ShellCheck - shell script analysis tool
+version: 0.9.0
+1.7.11
+zizmor 1.30.1
+mkdocs, version 1.6.1 from /opt/xenia/venv/lib/python3.11/site-packages/mkdocs (Python 3.11)
+segno 1.6.6
+...
+No findings to report. Good job! (12 suppressed)
+make check: OK
+
+real	1m34.614s
+user	0m37.820s
+sys	0m8.587s
+```
+
+```
+grep -c '^ok ' t32-container-check.log
+99
+```
