@@ -28,6 +28,14 @@ if [[ "$1" == "clone" ]]; then
   dest="${!#}"
   mkdir -p "$dest"
   cp "$FIXTURE_COMPOSE" "$dest/compose.yml"
+elif [[ "$1" == "-C" && "$3" == "checkout" ]]; then
+  # I5: the revert checks out the previous image's own commit into a separate directory. If that
+  # sha has its own fixture compose file (OLD_SHA_COMPOSE/OLD_SHA), write that one instead, so a
+  # test can prove the revert composes from the OLD commit, not the new one's checkout.
+  dir="$2" sha="${@: -1}"
+  if [[ -n "${OLD_SHA_COMPOSE:-}" && "$sha" == "${OLD_SHA:-}" ]]; then
+    cp "$OLD_SHA_COMPOSE" "$dir/compose.yml"
+  fi
 fi
 exit 0
 SH
@@ -183,6 +191,33 @@ compose() { printf '%b' "$1" > "$TMP/compose.yml"; }
   [[ "$output" == *"could not be rendered"* ]] || return 1
   [[ "$output" == *"FAKE_RENDER_FAIL: compose could not resolve a variable"* ]] || return 1
   [ "$(grep -c ' up -d --no-build --remove-orphans' "$CALLS")" -eq 0 ]
+}
+
+@test "I5: the revert checks out the previous image's own commit and composes from that directory, not the new commit's" {
+  OLD_SHA="$(printf 'b%.0s' $(seq 1 40))"
+  OLD_IMAGE_WITH_SHA="111111111.dkr.ecr.ca-central-1.amazonaws.com/xenia/xenia-test-team:sha-$OLD_SHA"
+  printf '%s\n' "$OLD_IMAGE_WITH_SHA" > "$RUNNING_IMAGE"
+  printf 'services:\n  web:\n    image: ${IMAGE:-web:local}\n    build: ./old-commit\n' > "$TMP/old-compose.yml"
+  export OLD_SHA_COMPOSE="$TMP/old-compose.yml" OLD_SHA
+  HEALTH_TIMEOUT=1 HEALTH_POLL_INTERVAL=1 run "$DEPLOY" ert485/xenia-2026 "$SHA" "$NEW_BAD_IMAGE" .
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"rolled back to $OLD_IMAGE_WITH_SHA"* ]] || return 1
+  [[ "$output" == *"rolling back with the previous commit's own compose file"* ]] || return 1
+  grep -qx "git clone -q https://github.com/ert485/xenia-2026.git $APP_STATE_DIR/revert-src" "$CALLS" || return 1
+  grep -qx "git -C $APP_STATE_DIR/revert-src checkout -q $OLD_SHA" "$CALLS" || return 1
+  # the revert's up ran with --project-directory pointing at the OLD commit's checkout, not $src
+  grep -qE -- "--project-directory $APP_STATE_DIR/revert-src/\. .*up -d --no-build --remove-orphans" "$CALLS" || return 1
+  ! grep -qE -- "--project-directory $APP_STATE_DIR/src/\. .*up -d --no-build --remove-orphans.*revert-src"
+}
+
+@test "I5: a previous image with no :sha-<commit> tag falls back to the current compose file and logs it" {
+  OLD_IMAGE_NO_SHA="111111111.dkr.ecr.ca-central-1.amazonaws.com/xenia/xenia-test-team:latest"
+  printf '%s\n' "$OLD_IMAGE_NO_SHA" > "$RUNNING_IMAGE"
+  HEALTH_TIMEOUT=1 HEALTH_POLL_INTERVAL=1 run "$DEPLOY" ert485/xenia-2026 "$SHA" "$NEW_BAD_IMAGE" .
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"rolled back to $OLD_IMAGE_NO_SHA"* ]] || return 1
+  [[ "$output" == *"no :sha-<commit> tag; rolling back with the current compose file"* ]] || return 1
+  [ "$(grep -c 'revert-src' "$CALLS")" -eq 0 ]
 }
 
 @test "M10: the app secret reaches docker compose's render and up on both the primary deploy and the revert, and never deploy.sh's own environment" {

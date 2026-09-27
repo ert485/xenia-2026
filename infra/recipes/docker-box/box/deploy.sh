@@ -142,6 +142,34 @@ if [[ -z "$prev_image" ]]; then
   exit 2
 fi
 
+# I5 of the final review: redeploying $prev_image with the NEW commit's compose file (still
+# checked out at $dir/$compose from the top of this script) contradicts scripts/rollback.sh, which
+# re-sends the previous image together with the commit it was built from "so the compose file
+# matches the image". If the failing change was in the compose file itself (a port, an env var, a
+# new service), reapplying it here just fails the revert too. Derive the previous commit from the
+# running image's own `:sha-<40 hex>` tag (the same pattern scripts/rollback.sh:35 reads) and check
+# it out into a separate directory, so the revert's render and isolation check (check_before_deploy
+# below) and its `up` all see the compose file the previous image actually shipped with. A tag with
+# no sha (this box has never redeployed an old build before, or the image predates this fix) keeps
+# today's behaviour: the current commit's compose file, with one log line saying so.
+if [[ "$prev_image" =~ :sha-([0-9a-f]{40})$ ]]; then
+  prev_sha="${BASH_REMATCH[1]}"
+  revert_src="$APP_STATE_DIR/revert-src"
+  rm -rf "$revert_src"
+  git clone -q "https://github.com/$repo.git" "$revert_src"
+  git -C "$revert_src" checkout -q "$prev_sha"
+  dir="$revert_src/$appdir"
+  compose=""
+  for c in compose.yml compose.yaml docker-compose.yml docker-compose.yaml; do
+    if [[ -f "$dir/$c" ]]; then compose="$dir/$c"; break; fi
+  done
+  [[ -n "$compose" ]] || die "no compose.yml or docker-compose.yml in $appdir at the previous commit ${prev_sha:0:7}"
+  check_compose_contract "$compose" || die "compose contract failed for the previous commit"
+  log "rolling back with the previous commit's own compose file (${prev_sha:0:7})"
+else
+  log "$prev_image has no :sha-<commit> tag; rolling back with the current compose file"
+fi
+
 check_before_deploy
 deploy_image "$prev_image"
 
