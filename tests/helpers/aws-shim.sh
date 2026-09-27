@@ -21,5 +21,7 @@ case "$*" in
     else printf '{"Targets":[]}\n'; fi ;;
   *"organizations attach-policy"*)  touch "$FAKE_STATE/scp-attached" ;;
   *"organizations detach-policy"*)  rm -f "$FAKE_STATE/scp-attached" ;;
+  *"ssm get-parameters-by-path"*)
+    [[ -n "${FAKE_APP_PARAMS:-}" ]] && cat "$FAKE_APP_PARAMS" ;;
   *) exit 0 ;;
 esac

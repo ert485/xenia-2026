@@ -73,6 +73,27 @@ SH
   # (only a passing health check advances it), so a revert that reads the file instead of asking
   # docker what's actually running would restore this instead of $OLD_IMAGE.
   STALE_PREVIOUS_IMAGE="111111111.dkr.ecr.ca-central-1.amazonaws.com/xenia/xenia-test-team:sha-stale"
+  export LIB="infra/recipes/docker-box/box/lib.sh"
+}
+
+# app_params_fixture <path>: writes a $FAKE_APP_PARAMS-shaped `get-parameters-by-path --output
+# json` document exercising: a normal accepted name; the exact name/value from the hotfix brief
+# that would blow up bash's `export NAME=value` on main and, per the workflow's masking (12-digit
+# numbers only), leak straight into this public repo's Actions log; a multi-line value (stands in
+# for a PEM key or pretty-printed JSON); and two reserved names (PATH, HEALTH_URL) that are
+# otherwise shell-identifier-shaped. Every value here is an obvious fake, not a real secret.
+app_params_fixture() {
+  cat > "$1" <<'JSON'
+{
+  "Parameters": [
+    {"Name": "/xenia/app/STRIPE_KEY", "Value": "sk_test_FAKEVALUE123"},
+    {"Name": "/xenia/app/stripe-key", "Value": "SECRET-VALUE-123"},
+    {"Name": "/xenia/app/MULTILINE_CFG", "Value": "fake-line-one\nfake-line-two\nfake-line-three"},
+    {"Name": "/xenia/app/PATH", "Value": "/fake/evil/bin"},
+    {"Name": "/xenia/app/HEALTH_URL", "Value": "http://fake.example.invalid/health"}
+  ]
+}
+JSON
 }
 
 compose() { printf '%b' "$1" > "$TMP/compose.yml"; }
@@ -148,4 +169,72 @@ compose() { printf '%b' "$1" > "$TMP/compose.yml"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"HEALTH_TIMEOUT"* ]] || return 1
   [[ "$output" == *"positive integer"* ]]
+}
+
+# --- apply_ssm_app_params (box/lib.sh): validates + exports /xenia/app/<NAME> parameters that
+# deploy.sh reads as JSON instead of the old --output text loop. Sourced and unit-tested here
+# (like ensure_networks in tests/ensure-networks.bats) rather than driven through a full
+# deploy.sh run: deploy.sh clones into the hardcoded /srv/app/src, a path this repo (and CI) has
+# no write access to outside the real Docker box.
+
+@test "apply_ssm_app_params: a valid name reaches the environment docker compose would see" {
+  app_params_fixture "$TMP/params.json"
+  export FAKE_APP_PARAMS="$TMP/params.json"
+  export ENV_DUMP="$TMP/env-dump"
+  cat > "$BIN/docker" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1 $2" == "compose up" ]] && env > "$ENV_DUMP"
+exit 0
+EOF
+  chmod +x "$BIN/docker"
+  run bash -c '
+    source "$LIB"
+    apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption --output json)"
+    docker compose up
+  '
+  [ "$status" -eq 0 ]
+  grep -qx "STRIPE_KEY=sk_test_FAKEVALUE123" "$ENV_DUMP"
+}
+
+@test "apply_ssm_app_params: app/stripe-key with a secret value is skipped, stays exit 0, and the value never appears in output" {
+  app_params_fixture "$TMP/params.json"
+  export FAKE_APP_PARAMS="$TMP/params.json"
+  run bash -c '
+    source "$LIB"
+    apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption --output json)"
+    echo deploy-continued
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deploy-continued"* ]] || return 1
+  [[ "$output" != *"SECRET-VALUE-123"* ]]
+}
+
+@test "apply_ssm_app_params: a multi-line value arrives intact" {
+  app_params_fixture "$TMP/params.json"
+  export FAKE_APP_PARAMS="$TMP/params.json"
+  # 2>/dev/null: the fixture's other, deliberately-rejected entries each log one skip line (to
+  # stderr, which `run` merges into $output); this test only cares about MULTILINE_CFG's value.
+  run bash -c '
+    source "$LIB"
+    apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption --output json)" 2>/dev/null
+    printf "%s" "$MULTILINE_CFG"
+  '
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'fake-line-one\nfake-line-two\nfake-line-three')" ]
+}
+
+@test "apply_ssm_app_params: PATH and HEALTH_URL are skipped (reserved names)" {
+  app_params_fixture "$TMP/params.json"
+  export FAKE_APP_PARAMS="$TMP/params.json"
+  run bash -c '
+    orig_path="$PATH"
+    orig_health="${HEALTH_URL:-}"
+    source "$LIB"
+    apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption --output json)"
+    [[ "$PATH" == "$orig_path" ]] && echo "PATH unchanged"
+    [[ "${HEALTH_URL:-}" == "$orig_health" ]] && echo "HEALTH_URL unchanged"
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PATH unchanged"* ]] || return 1
+  [[ "$output" == *"HEALTH_URL unchanged"* ]]
 }
