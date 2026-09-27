@@ -6,8 +6,10 @@ battle test that motivated it (see `docs/superpowers/plans/2026-09-25-container-
 `autonomous-task.md` is the unattended-work ruleset: never ask, decide and record, two strikes,
 fifteen minutes, every credentialed step files a request (`scripts/agent-requests.sh` on the Mac
 is the other half of that), never present a result you didn't get, and end the turn after
-`REPORT.md`. It is generic: drop it into any repo, alongside that repo's own `TASK.md` (the task's
-actual requirements), and start an unattended run from it.
+`REPORT.md`. It is generic: copy it into any repo's root **as `AUTONOMOUS.md`** (that's the name
+`plugin/scripts/agent-verify.sh`'s root-files check already allows — copying it in under its
+template name, `autonomous-task.md`, blocks the kit's own `verify` job on the new file), alongside
+that repo's own `TASK.md` (the task's actual requirements), and start an unattended run from it.
 
 `scripts/agent-requests.sh` runs an approved command from the agent's own workspace, not a
 pristine clone, so it can only refuse a tampered git state (a planted hook, a stray local config
@@ -23,10 +25,10 @@ branch with neither has nothing holding it to the rules above.
 
 ## Starting a headless run
 
-From inside the dev container, on the branch with `TASK.md` and `autonomous-task.md` (copied from
-this template) both committed:
+From inside the dev container, on the branch with `TASK.md` and `AUTONOMOUS.md` (copied from this
+template's `autonomous-task.md`) both committed at the repository root:
 
-    claude -p "$(cat autonomous-task.md)" \
+    claude -p "$(cat AUTONOMOUS.md)" \
       --allowedTools Read,Write,Edit,Bash \
       --disallowedTools Skill,ScheduleWakeup,CronCreate,CronDelete,CronList,TaskStop,TaskCreate,TaskUpdate,EnterWorktree,ExitWorktree,Workflow,SendMessage,Monitor,Task,Agent,WebFetch,WebSearch \
       --max-turns 120 \

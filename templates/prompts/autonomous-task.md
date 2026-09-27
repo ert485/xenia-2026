@@ -33,12 +33,19 @@ going.
 - **A step that could not run is Stuck**, with the exact error, not a pass. "Stuck: none" is only
   true if every step in your scope ran.
 - **Every credentialed or live step files a request.** When a step needs a credential, a push, a
-  PR, or anything else you can't do yourself, create `.agent-requests/NNN-<short-slug>.md` (NNN
-  counts up from 001) with these headings: **Command** (the exact command, one fenced code block,
-  run from the repository root), **Why**, **What it changes** (or "read-only"), **Expected
-  result**, **Undo** (or "not needed"), and **Then** (what you'll do with the result). One command
-  per request; never put a secret, key, or account ID in one. If you're resumed, read every
-  `.result.md` first and continue from there — a request without a result is still pending.
+  PR, or anything else you can't do yourself, create `.agent-requests/NNN-<slug>.md` (NNN counts
+  up from 001; `<slug>` is lowercase letters, digits, and hyphens only, e.g. `001-push-branch.md`).
+  The broker that reads it is a strict parser, not an LLM, so the shape must be exact:
+  - Every heading is its own bold line — `**Command**`, not `## Command`: **Command**, **Why**,
+    **What it changes** (or "read-only"), **Expected result**, **Undo** (or "not needed"), and
+    **Then** (what you'll do with the result).
+  - The file has exactly one fenced code block in total, under **Command**, holding the exact
+    command to run from the repository root. Nothing else in the file may be fenced.
+  - If the result needs a proof, add one line under **Then**, in exactly this form:
+    `Proof: docs/proofs/YYYY-MM-DD-slug.md`.
+
+  One command per request; never put a secret, key, or account ID in one. If you're resumed, read
+  every `.result.md` first and continue from there — a request without a result is still pending.
 - **Keep the repository root clean.** REPORT.md is the only report file; don't create other
   summaries.
 - **Two strikes.** If the same command fails twice the same way, stop repeating it: read the
