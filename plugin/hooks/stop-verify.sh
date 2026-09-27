@@ -16,8 +16,9 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
+# ok-to-hide: hook plumbing that must never wedge a session; a malformed payload falls back below.
 cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)" || cwd=""
-session_id="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)" || session_id=""
+session_id="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)" || session_id="" # ok-to-hide: same as above
 [[ -n "$cwd" && -d "$cwd" ]] || exit 0
 session_id="${session_id:-nosession}"
 # The counter file's name is built from this value (fix-round-1: a payload with session_id
@@ -26,6 +27,7 @@ session_id="${session_id:-nosession}"
 [[ "$session_id" =~ ^[A-Za-z0-9_-]+$ ]] || session_id=nosession
 
 # Not inside a git worktree, or the worktree has no commits yet: exit 0 silently.
+# ok-to-hide: same must-never-wedge guarantee; nothing to verify outside a git worktree.
 worktree_root="$(cd "$cwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 [[ -n "$worktree_root" ]] || exit 0
 git -C "$worktree_root" rev-parse HEAD >/dev/null 2>&1 || exit 0
@@ -62,6 +64,7 @@ fi
 mkdir -p "$(dirname "$counter")"
 prior=0
 if [[ -f "$counter" ]]; then
+  # ok-to-hide: an unreadable counter file defaults to 0; the next line validates the format too.
   prior="$(cat "$counter" 2>/dev/null || echo 0)"
   [[ "$prior" =~ ^[0-9]+$ ]] || prior=0
 fi

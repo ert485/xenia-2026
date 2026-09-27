@@ -11,6 +11,7 @@ for v in "$stops" "$restore" "$cost" "$stop_cmd"; do
   [[ -n "$v" && "$v" != *$'\n'* ]] || { echo "shutdown-entry: every field is one non-empty line" >&2; exit 1; }
 done
 
+# ok-to-hide: probe for whether we're inside a git repo; falls back to the current directory.
 dir="${SHUTDOWN_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)/shutdown.d}"
 mkdir -p "$dir"
 max=30
@@ -21,6 +22,7 @@ for f in "$dir"/[0-9][0-9]-*.sh; do
 done
 nn=$(( (max / 10 + 1) * 10 ))
 out="$dir/$nn-$name.sh"
+# ok-to-hide: fallback author name when git user.name isn't set; "unknown" is a fine substitute.
 who="$(git config user.name 2>/dev/null || echo unknown)"
 
 {
@@ -38,4 +40,16 @@ who="$(git config user.name 2>/dev/null || echo unknown)"
 chmod +x "$out"
 bash -n "$out"
 echo "wrote $out"
+
+# Regenerate SHUTDOWN.md so this new entry (and the PR that adds it) doesn't fail render-shutdown-md
+# for being stale. render-shutdown-md.sh is this script's sibling, vendored the same way.
+renderer="$(dirname "$0")/render-shutdown-md.sh"
+md="$(cd "$dir/.." && pwd)/SHUTDOWN.md"
+if [[ -x "$renderer" ]]; then
+  "$renderer" "$dir" > "$md.tmp" && mv "$md.tmp" "$md"
+  echo "regenerated $md"
+else
+  echo "shutdown-entry: warning: $renderer is missing; regenerate SHUTDOWN.md by hand (make shutdown-md, or plugin/scripts/render-shutdown-md.sh shutdown.d > SHUTDOWN.md)" >&2
+fi
+
 echo "Teammate: commit it in the same PR as the billable change; the Shutdown: line is then not needed."

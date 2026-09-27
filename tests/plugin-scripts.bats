@@ -71,6 +71,18 @@ EOF
   [ -f "$SHUTDOWN_DIR/50-bar.sh" ]
 }
 
+@test "shutdown-entry leaves SHUTDOWN.md up to date" {
+  export SHUTDOWN_DIR="$TMP/shutdown.d"
+  run plugin/scripts/shutdown-entry.sh foo "the foo queue workers" "scripts/foo-start.sh" "about \$0.10/hour" "true"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"regenerated $TMP/SHUTDOWN.md"* ]] || return 1
+  [ -f "$TMP/SHUTDOWN.md" ]
+  want="$(plugin/scripts/render-shutdown-md.sh "$SHUTDOWN_DIR")"
+  got="$(cat "$TMP/SHUTDOWN.md")"
+  [ "$got" = "$want" ] || return 1
+  [[ "$got" == *"| \`40-foo.sh\` | the foo queue workers |"* ]]
+}
+
 @test "the generated entry honours DRY_RUN and otherwise runs the stop command" {
   export SHUTDOWN_DIR="$TMP/shutdown.d"
   plugin/scripts/shutdown-entry.sh foo "foo" "x" "free" "touch $TMP/stopped"
@@ -88,6 +100,27 @@ EOF
   [ "$status" -eq 1 ]
   run plugin/scripts/shutdown-entry.sh foo "$(printf 'two\nlines')" "x" "x" "true"
   [ "$status" -eq 1 ]
+}
+
+# preview.sh
+
+@test "preview.sh explains when the branch has no open PR" {
+  printf '#!/usr/bin/env bash\necho "no pull requests found for branch \\"x\\"" >&2\nexit 1\n' > "$TMP/gh"
+  chmod +x "$TMP/gh"
+  run plugin/scripts/preview.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"this branch has no open PR"* ]] || return 1
+  [[ "$output" != *"gh failed"* ]]
+}
+
+@test "preview.sh distinguishes a gh auth failure from no open PR" {
+  printf '#!/usr/bin/env bash\necho "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2\nexit 1\n' > "$TMP/gh"
+  chmod +x "$TMP/gh"
+  run plugin/scripts/preview.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gh failed"* ]] || return 1
+  [[ "$output" == *"401"* ]] || return 1
+  [[ "$output" != *"no open PR"* ]]
 }
 
 # rule-feedback-line.sh

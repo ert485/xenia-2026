@@ -11,7 +11,7 @@ setup() {
   git add README.md && git commit -qm base
   BASE="$(git rev-parse HEAD)"
   git checkout -qb feature
-  unset SAMPLE LABELS PR
+  unset SAMPLE LABELS PR ACTION ADDED_LABEL EXISTING_DEEP_REVIEW_COMMENT
 }
 
 commit() { git add -A && git commit -qm change; HEAD_SHA="$(git rev-parse HEAD)"; }
@@ -123,6 +123,34 @@ trigger() { run "$KIT/scripts/ci/deep-review-trigger.sh" "$BASE" "$HEAD_SHA"; }
 @test "a non-matching label list falls through to sampling" {
   printf 'more\n' >> README.md && commit
   LABELS="review,breaking-ok" SAMPLE=all trigger
+  [ "$status" -eq 0 ]
+  [ "$output" = "run=true reason=sample all" ]
+}
+
+@test "labeled with another label does not run, even with SAMPLE unset" {
+  printf 'more\n' >> README.md && commit
+  ACTION=labeled ADDED_LABEL=needs-triage trigger
+  [ "$status" -eq 0 ]
+  [ "$output" = "run=false reason=label-mismatch" ]
+}
+
+@test "labeled deep-review runs" {
+  printf 'more\n' >> README.md && commit
+  ACTION=labeled ADDED_LABEL=deep-review LABELS=deep-review trigger
+  [ "$status" -eq 0 ]
+  [ "$output" = "run=true reason=label" ]
+}
+
+@test "an existing deep-review comment for this head sha skips (once per head SHA)" {
+  printf 'more\n' >> README.md && commit
+  EXISTING_DEEP_REVIEW_COMMENT="$(printf '<!-- xenia-deep-review -->\n<!-- xenia-deep-review-sha:%s -->\nBot deep review.\n' "$HEAD_SHA")" trigger
+  [ "$status" -eq 0 ]
+  [ "$output" = "run=false reason=already-reviewed" ]
+}
+
+@test "a deep-review comment marker for an older sha still runs" {
+  printf 'more\n' >> README.md && commit
+  EXISTING_DEEP_REVIEW_COMMENT="$(printf '<!-- xenia-deep-review -->\n<!-- xenia-deep-review-sha:%s -->\nBot deep review.\n' "$BASE")" trigger
   [ "$status" -eq 0 ]
   [ "$output" = "run=true reason=sample all" ]
 }

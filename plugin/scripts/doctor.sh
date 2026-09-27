@@ -11,18 +11,21 @@ fail() { printf 'FAIL  %s: %s\n' "$1" "$2"; fails=$((fails + 1)); }
 if gh auth status >/dev/null 2>&1; then ok "gh is logged in"
 else fail "gh is logged in" "run gh auth login (Codespaces does this for you)"; fi
 
+# ok-to-hide: this is the probe itself; an unset value is handled by the fail branch below.
 if [[ -n "$(git config user.name 2>/dev/null)" && -n "$(git config user.email 2>/dev/null)" ]]; then ok "git identity is set"
 else fail "git identity is set" "git config --global user.name '<your name>' and user.email (your GitHub noreply address keeps your email private)"; fi
 
 base="${ANTHROPIC_BASE_URL:-https://llm.26.cohack.tetl.ca}"
 if [[ -z "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
   fail "gateway key" "paste your key into .devcontainer/ai.local.env or set the GATEWAY_KEY Codespaces secret, then open a new terminal"
+# ok-to-hide: this is the connectivity probe itself; the else branch below reports the failure.
 elif curl -fsS -m 10 -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" "$base/v1/models" 2>/dev/null | jq -e '.data[] | select(.id == "qwen3-coder")' >/dev/null 2>&1; then
   ok "gateway answers with your key ($base)"
 else
   fail "gateway answers with your key" "the key was refused or $base is unreachable; if the key leaked or expired, ask Erik for a new one by direct message"
 fi
 
+# ok-to-hide: probe for whether the Docker CLI exists; an empty $client is handled below.
 client="$(docker version --format '{{.Client.Version}}' 2>/dev/null | head -1 || true)"
 if [[ -n "$client" ]]; then
   ok "docker client $client"
@@ -39,6 +42,7 @@ else
 fi
 
 if [[ -n "${DISCORD_WEBHOOK_URL:-}" ]]; then
+  # ok-to-hide: HTTP status probe; a network failure falls back to "000", reported as a FAIL below.
   code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -X GET "$DISCORD_WEBHOOK_URL" || echo 000)"
   if [[ "$code" == "200" ]]; then ok "Discord webhook reachable"
   else fail "Discord webhook reachable" "HTTP $code; check the URL, and that discord.com is in the firewall allow-list"; fi
@@ -46,6 +50,7 @@ else
   warn "Discord webhook" "DISCORD_WEBHOOK_URL is not set, so /notify can't post"
 fi
 
+# ok-to-hide: gitleaks is already known present here; a version-read failure just prints blank.
 if command -v gitleaks >/dev/null 2>&1; then ok "gitleaks $(gitleaks version 2>/dev/null)"
 else warn "gitleaks" "push protection covers provider keys; gitleaks missing means the sk- rule runs only in CI"; fi
 

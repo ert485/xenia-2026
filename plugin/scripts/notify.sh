@@ -24,10 +24,13 @@ if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
   exit 1
 fi
 
+# ok-to-hide: optional probe for a git remote; an empty $repo falls back below.
 url="$(git remote get-url origin 2>/dev/null || true)"
 url="${url%.git}"
 repo="${url##*/}"
+# ok-to-hide: fallback repo name when there's no remote: the worktree's directory name.
 [[ -n "$repo" ]] || repo="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")"
+# ok-to-hide: fallback author name when git user.name isn't set; "unknown" is a fine substitute.
 who="$(git config user.name 2>/dev/null || echo unknown)"
 body="$(jq -nc --arg c "[agent · $repo · $who] $msg" '{content: $c, allowed_mentions: {parse: []}}')"
 curl -fsS -m 10 -H 'Content-Type: application/json' -d "$body" "$DISCORD_WEBHOOK_URL" >/dev/null

@@ -1,6 +1,6 @@
-# pr-review: the bot's advisory review (spec section 12). Never blocks a merge: only make check and
-# shutdown coverage do (P-two-gates). Three jobs, so the agent that reads PR content holds no write
-# token and the job holding the write token never runs PR code.
+# pr-review: the bot's advisory review (spec section 12). Never blocks a merge itself: check,
+# shutdown-coverage and verify are the three required checks that do. Three jobs, so the agent that
+# reads PR content holds no write token and the job holding the write token never runs PR code.
 #
 # Task 33 adds a second, deeper pass (deep-decide, deep-review, deep-comment) that reruns the same
 # bot with a wider brief and, unlike the quick review, lets it use Bash: it needs to actually run
@@ -26,6 +26,7 @@ jobs:
   check:
     name: review-inputs
     needs: deep-decide
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -121,6 +122,7 @@ jobs:
           MODE: ${{ needs.check.outputs.mode }}
           REVIEW_PROMPT: ${{ env.REVIEW_PROMPT }}
           REVIEW_MAX_TURNS: ${{ env.REVIEW_MAX_TURNS }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           case "$MODE" in
             consistency) kit_path=templates/review/consistency-prompt.md ;;
@@ -132,6 +134,7 @@ jobs:
             echo "::error::$msg"
             {
               echo '<!-- xenia-pr-review -->'
+              echo "<!-- xenia-pr-review-sha:$HEAD_SHA -->"
               # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
               echo 'Bot review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
               if [ "$MODE" = consistency ]; then echo 'Mode: consistency (this PR changes the team rules).'; fi
@@ -155,6 +158,7 @@ jobs:
           fi
           {
             echo '<!-- xenia-pr-review -->'
+            echo "<!-- xenia-pr-review-sha:$HEAD_SHA -->"
             # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
             echo 'Bot review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
             if [ "$MODE" = consistency ]; then echo 'Mode: consistency (this PR changes the team rules).'; fi
@@ -222,10 +226,18 @@ jobs:
         id: decide
         env:
           SAMPLE: ${{ env.DEEP_REVIEW_SAMPLE }}
+          ACTION: ${{ github.event.action }}
+          ADDED_LABEL: ${{ github.event.label.name }}
+          GH_TOKEN: ${{ github.token }}
+          # A team PR could add its own executable scripts/ci/deep-review-trigger.sh; select the
+          # kit's own checkout by repository identity, not by whether that file happens to exist.
+          IS_KIT_REPO: ${{ github.repository == 'ert485/xenia-2026' }}
         run: |
-          if [ -x scripts/ci/deep-review-trigger.sh ]; then kit=.; else kit=.kit; fi
+          if [ "$IS_KIT_REPO" = "true" ]; then kit=.; else kit=.kit; fi
+          existing_comment="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.body | startswith("<!-- xenia-deep-review -->"))] | last | .body // empty' 2>/dev/null)" || existing_comment=""
           set +e
-          out="$("$kit/scripts/ci/deep-review-trigger.sh" "$BASE_SHA" "$HEAD_SHA")"
+          out="$(EXISTING_DEEP_REVIEW_COMMENT="$existing_comment" "$kit/scripts/ci/deep-review-trigger.sh" "$BASE_SHA" "$HEAD_SHA")"
           rc=$?
           set -e
           echo "deep-review-trigger: $out (exit $rc)"
@@ -240,12 +252,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
+          set +e
           quick="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
-            --jq '[.[] | select(.body | startswith("<!-- xenia-pr-review -->"))] | last | .body // empty' 2>/dev/null)" || quick=""
-          if [ -n "$quick" ]; then
-            printf '%s\n' "$quick" > quick-review.md
-          else
+            --jq '[.[] | select(.body | startswith("<!-- xenia-pr-review -->"))] | last | .body // empty')"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "(could not fetch the quick review's comment: API error)" > quick-review.md
+          elif [ -z "$quick" ]; then
             echo "(the quick review has not posted a comment on this PR yet)" > quick-review.md
+          else
+            marker_sha="$(printf '%s\n' "$quick" | sed -nE 's/^<!-- xenia-pr-review-sha:([0-9a-fA-F]{7,40}) -->$/\1/p' | head -n1)"
+            if [ "$marker_sha" = "$HEAD_SHA" ]; then
+              printf '%s\n' "$quick" > quick-review.md
+            else
+              echo "(no quick review ran for this commit)" > quick-review.md
+            fi
           fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -309,6 +331,7 @@ jobs:
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
           DEEP_REVIEW_PROMPT: ${{ env.DEEP_REVIEW_PROMPT }}
           DEEP_REVIEW_MAX_TURNS: ${{ env.DEEP_REVIEW_MAX_TURNS }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           kit_path="$DEEP_REVIEW_PROMPT"
           prompt=".kit/$kit_path"
@@ -317,6 +340,7 @@ jobs:
             echo "::error::$msg"
             {
               echo '<!-- xenia-deep-review -->'
+              echo "<!-- xenia-deep-review-sha:$HEAD_SHA -->"
               # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
               echo 'Bot deep review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
               echo
@@ -339,6 +363,7 @@ jobs:
           fi
           {
             echo '<!-- xenia-deep-review -->'
+            echo "<!-- xenia-deep-review-sha:$HEAD_SHA -->"
             # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
             echo 'Bot deep review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
             echo

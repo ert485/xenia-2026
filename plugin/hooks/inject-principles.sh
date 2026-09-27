@@ -14,6 +14,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 repo_slug() {
   local url
+  # ok-to-hide: optional probe for a git remote; its absence is handled by returning an empty slug.
   url="$(git remote get-url origin 2>/dev/null)" || return 0
   url="${url%/}"
   url="${url%.git}"
@@ -28,12 +29,14 @@ repo_slug() {
 }
 
 bundled_text() {
+  # ok-to-hide: read attempt with an explicit "missing" message as its own fallback, not silence.
   cat "$bundled" 2>/dev/null || printf '%s' "(the kit's bundled PRINCIPLES.md is missing; read PRINCIPLES.md in the repo root)"
 }
 
 compose() {
   local slug top body note size
   slug="$(repo_slug)"
+  # ok-to-hide: optional probe for a git repo; an empty $top falls back to the bundled copy below.
   top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
   if [[ -n "$slug" && -n "$top" && -f "$top/PRINCIPLES.md" && -f "$allowed" ]] && grep -qixF -- "$slug" "$allowed"; then
     size="$(wc -c < "$top/PRINCIPLES.md" | tr -d ' ')"
@@ -52,9 +55,10 @@ compose() {
 
 emit() { jq -n --arg ctx "$1" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'; }
 
+# ok-to-hide: hook plumbing that must never wedge (header: "always exits 0"); exit 0 always runs.
 text="$(compose 2>/dev/null)" || text=""
 if [[ -z "$text" ]] || ! emit "$text"; then
   emit "Agent: these are the team's rules (kit default copy).
-$(bundled_text)" || true
+$(bundled_text)" || true # ok-to-hide: same must-never-wedge guarantee for the fallback emit
 fi
 exit 0

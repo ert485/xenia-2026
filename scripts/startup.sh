@@ -34,7 +34,7 @@ if [[ -n "$stopped" && "$stopped" != "None" ]]; then
   first="${stopped%%[[:space:]]*}"
   for _ in $(seq 1 60); do
     ping="$(aws_box ssm describe-instance-information --filters "Key=InstanceIds,Values=$first" \
-      --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)"
+      --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)" # ok-to-hide: polling probe; not-yet-online just means try again below
     [[ "$ping" == "Online" ]] && break
     sleep 5
   done
