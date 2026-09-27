@@ -52,6 +52,7 @@ case "$*" in
     if [[ -n "${FAKE_RENDER_JSON:-}" ]]; then printf '%s\n' "$FAKE_RENDER_JSON"; else printf '{"services":{"web":{}}}\n'; fi ;;
   inspect*)
     if [[ -s "$RUNNING_IMAGE" ]]; then cat "$RUNNING_IMAGE"; exit 0; fi
+    echo "Error: No such object: app-web" >&2
     exit 1 ;;
   *" up -d --no-build --remove-orphans")
     printf '%s\n' "$IMAGE" > "$RUNNING_IMAGE"
@@ -237,6 +238,7 @@ case "$*" in
     printf '{"services":{"web":{}}}\n' ;;
   inspect*)
     if [[ -s "$RUNNING_IMAGE" ]]; then cat "$RUNNING_IMAGE"; exit 0; fi
+    echo "Error: No such object: app-web" >&2
     exit 1 ;;
   *" up -d --no-build --remove-orphans")
     { echo "--- up -d ---"; env; } >> "$ENV_LOG"
@@ -270,6 +272,33 @@ SH
   [ "$(grep -c '^--- up -d ---$' "$ENV_LOG")" -eq 2 ] || return 1
   [ "$(grep -cx 'STRIPE_KEY=sk_test_FAKEVALUE123' "$ENV_LOG")" -ge 4 ] || return 1
   ! grep -qx 'STRIPE_KEY=sk_test_FAKEVALUE123' "$ENV_LOG.curl"
+}
+
+@test "M7: a docker daemon error looking up app-web is not reported as no previous image" {
+  rm -f "$RUNNING_IMAGE" "$APP_STATE_DIR/previous"
+  cat > "$BIN/docker" <<'SH'
+#!/usr/bin/env bash
+printf 'docker %s\n' "$*" >> "$CALLS"
+case "$*" in
+  login*)
+    cat >/dev/null
+    exit 0 ;;
+  *" config --format json")
+    printf '{"services":{"web":{}}}\n' ;;
+  inspect*)
+    echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?" >&2
+    exit 1 ;;
+  *)
+    exit 0 ;;
+esac
+SH
+  chmod +x "$BIN/docker"
+  HEALTH_TIMEOUT=1 HEALTH_POLL_INTERVAL=1 run "$DEPLOY" ert485/xenia-2026 "$SHA" "$NEW_GOOD_IMAGE" .
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docker inspect app-web failed"* ]] || return 1
+  [[ "$output" == *"Cannot connect to the Docker daemon"* ]] || return 1
+  [[ "$output" != *"no previous image"* ]] || return 1
+  [ "$(grep -c ' up -d' "$CALLS")" -eq 0 ]
 }
 
 @test "HEALTH_TIMEOUT=abc is refused" {

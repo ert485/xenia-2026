@@ -56,3 +56,25 @@ EOF
   grep -q 'ec2 stop-instances --instance-ids i-0123456789abcdef0' "$AWS_CALLS"
   grep -q 'ssm send-command --instance-ids i-0fedcba9876543210 --document-name xenia-gateway' "$AWS_CALLS"
 }
+
+@test "M7: gpu.sh stop shows the real reason when disabling the GPU alarms fails, and still stops the box" {
+  cat > "$TMP/aws" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$AWS_CALLS"
+case "\$*" in
+  *"sts get-caller-identity"*) echo 111111111 ;;
+  *"ec2 describe-instances"*"gpu-box"*)    echo i-0123456789abcdef0 ;;
+  *"ec2 describe-instances"*"docker-box"*) echo i-0fedcba9876543210 ;;
+  *"cloudwatch disable-alarm-actions"*) echo "AccessDeniedException: explicit deny" >&2; exit 1 ;;
+  *"ssm send-command --instance-ids i-0fedcba9876543210"*) echo cmd-gateway ;;
+  *"get-command-invocation --command-id cmd-gateway"*"--query Status"*)   echo Success ;;
+  *"get-command-invocation --command-id cmd-gateway"*)   printf 'gateway updated\t\n' ;;
+esac
+exit 0
+EOF
+  chmod +x "$TMP/aws"
+  GPU_PROFILE=cohack run scripts/gpu.sh stop
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"could not disable the GPU alarms: "*"AccessDeniedException"* ]] || return 1
+  grep -q 'ec2 stop-instances --instance-ids i-0123456789abcdef0' "$AWS_CALLS"
+}

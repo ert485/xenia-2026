@@ -40,7 +40,18 @@ for db in "${dbs[@]}"; do
   docker exec "$c" psql -q -U "$user" -d postgres -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE);"
 done
 
-docker exec -i "$c" psql -q -U "$user" -d postgres < "$work/dump.sql" > "$work/psql.log" 2>&1 || true
+# psql_rc: M7 of the final review. Without ON_ERROR_STOP, psql normally continues past a SQL error
+# in the script and exits 0 at the end even though a statement failed -- that's why the check below
+# is grep-based, not exit-code-based. But 2 (and above) means psql itself failed hard (couldn't
+# connect, or the docker exec that ran it failed): the log-file grep can miss that entirely (a
+# connection failure's message starts "psql: error:", not "ERROR"), and used to fall straight
+# through to "restored" below.
+psql_rc=0
+docker exec -i "$c" psql -q -U "$user" -d postgres < "$work/dump.sql" > "$work/psql.log" 2>&1 || psql_rc=$?
+if [[ "$psql_rc" -ge 2 ]]; then
+  tail -20 "$work/psql.log" >&2
+  die "psql exited $psql_rc (connection or fatal error); the pre-restore state is $pre"
+fi
 unexpected="$(grep 'ERROR' "$work/psql.log" | grep -v 'already exists' || true)"
 if [[ -n "$unexpected" ]]; then
   printf '%s\n' "$unexpected" | head -20 >&2

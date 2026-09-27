@@ -15,7 +15,7 @@ case "$*" in
   "inspect -f {{.Config.Image}} "*) echo "$FAKE_IMAGE" ;;
   "inspect -f {{range .Config.Env}}{{println .}}{{end}} "*) printf 'POSTGRES_USER=app\nPOSTGRES_DB=app\n' ;;
   *"pg_dumpall"*) echo "-- current state" ;;
-  "exec -i "*) cat > "$FAKE/replayed.sql"; echo 'ERROR:  role "app" already exists'; [[ -n "${FAKE_PSQL_ERROR:-}" ]] && echo "ERROR:  $FAKE_PSQL_ERROR"; exit 0 ;;
+  "exec -i "*) cat > "$FAKE/replayed.sql"; echo 'ERROR:  role "app" already exists'; [[ -n "${FAKE_PSQL_ERROR:-}" ]] && echo "ERROR:  $FAKE_PSQL_ERROR"; exit "${FAKE_PSQL_EXIT:-0}" ;;
   *) exit 0 ;;
 esac
 SH
@@ -63,4 +63,11 @@ SH
   [ "$status" -eq 1 ]
   [[ "$output" == *'relation "proof" does not exist'* ]] || return 1
   [[ "$output" != *'role "app" already exists'* ]]
+}
+
+@test "M7: psql exiting 2 (connection or fatal error, no ERROR line) still fails the restore instead of logging restored" {
+  FAKE_PSQL_EXIT=2 run "$BOX/restore.sh" "host/app-db-1/20260925T030000Z.sql.gz" app-db-1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"psql exited 2"* ]] || return 1
+  [[ "$output" != *"restored host/app-db-1"* ]]
 }

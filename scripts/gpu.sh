@@ -113,11 +113,15 @@ fi
 aws_() { aws --profile "$profile" --region "$region" "$@"; }
 
 # gpu_alarm_actions <enable|disable> <profile>: the metrics-missing alarm fires on a stopped box, so stop
-# silences both GPU alarms and start re-arms them. Never fatal: the alarms are Should tier.
+# silences both GPU alarms and start re-arms them. Never fatal: the alarms are Should tier. M7 of
+# the final review: show the real reason (a permissions error looks nothing like "not applied
+# yet"), still non-fatal.
 gpu_alarm_actions() {
-  aws cloudwatch "$1-alarm-actions" --region us-east-1 --profile "$2" \
-    --alarm-names xenia-gpu-box-unhealthy xenia-gpu-box-metrics-missing 2>/dev/null \
-    || log "could not $1 the GPU alarms (not applied yet?)"
+  local reason
+  if ! reason="$(aws cloudwatch "$1-alarm-actions" --region us-east-1 --profile "$2" \
+      --alarm-names xenia-gpu-box-unhealthy xenia-gpu-box-metrics-missing 2>&1)"; then
+    log "could not $1 the GPU alarms: $reason"
+  fi
 }
 
 instance() {
@@ -147,6 +151,8 @@ run_on_box() {
 wait_ssm_online() {
   local ping
   for _ in $(seq 1 60); do
+    # ok-to-hide: a transient SSM API hiccup while polling just means "not online yet"; the
+    # bounded loop below is what fails the wait if it never comes online.
     ping="$(aws_ ssm describe-instance-information --filters "Key=InstanceIds,Values=$id" \
       --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)"
     [[ "$ping" == "Online" ]] && return 0

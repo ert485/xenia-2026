@@ -120,7 +120,21 @@ wait_for_health() {
 # manual path reads — only once THIS deploy's own health check passes, a few lines down; a deploy
 # that fails (this one, or the revert redeploying $prev_image) never writes it, so a failed deploy
 # can never overwrite the one record of what was last known good.
-prev_image="$(docker inspect -f '{{.Config.Image}}' app-web 2>/dev/null || true)"
+#
+# M7 of the final review: `docker inspect` fails both when app-web simply doesn't exist yet (every
+# first deploy on a fresh box) and when docker itself is broken (daemon down, socket permissions).
+# Blindly swallowing both into "" reported a real docker failure as "no previous image to roll back
+# to" later, instead of the docker error that actually caused it. Only the specific
+# "no such object/container" message is treated as "no previous image"; anything else dies here.
+prev_image=""
+if ! prev_output="$(docker inspect -f '{{.Config.Image}}' app-web 2>&1)"; then
+  case "$prev_output" in
+    *"No such object"*|*"No such container"*) prev_image="" ;;
+    *) die "docker inspect app-web failed: $prev_output" ;;
+  esac
+else
+  prev_image="$prev_output"
+fi
 
 deploy_image "$image"
 
