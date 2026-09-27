@@ -11,5 +11,5 @@ keywords = ["sk-"]
 
 [allowlist]
 description = "documentation placeholders and test fixtures"
-regexes = ['''sk-x{20,}''', '''sk-<[a-z-]+>''']
+regexes = ['''sk-x{20,}''', '''sk-<[a-z-]+>''', '''sk_test_FAKEVALUE[0-9]*''']
 paths = ['''^tests/fixtures/''']
