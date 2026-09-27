@@ -1,6 +1,6 @@
-# pr-review: the bot's advisory review (spec section 12). Never blocks a merge: only make check and
-# shutdown coverage do (P-two-gates). Three jobs, so the agent that reads PR content holds no write
-# token and the job holding the write token never runs PR code.
+# pr-review: the bot's advisory review (spec section 12). Never blocks a merge itself: check,
+# shutdown-coverage and verify are the three required checks that do. Three jobs, so the agent that
+# reads PR content holds no write token and the job holding the write token never runs PR code.
 #
 # Task 33 adds a second, deeper pass (deep-decide, deep-review, deep-comment) that reruns the same
 # bot with a wider brief and, unlike the quick review, lets it use Bash: it needs to actually run

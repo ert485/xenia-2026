@@ -12,7 +12,8 @@ public and carries your GitHub name: no keys, no contact details, nothing person
 2. Open the repo in a Codespace or the dev container (`.devcontainer/`), add your gateway key as the
    `GATEWAY_KEY` secret or in `.devcontainer/ai.local.env`, run `/doctor`, then `claude`.
 3. Push a branch and open a PR: you get a preview URL within a few minutes (`make preview-url`).
-4. Merge your own PR when CI is green. `main` deploys to https://app.26.cohack.tetl.ca.
+4. Merge your own PR once its three required checks are green (`check`, `shutdown-coverage`,
+   `verify`; details in `CONTRIBUTING.md`). `main` deploys to https://app.26.cohack.tetl.ca.
 
 ## Everyday commands
 

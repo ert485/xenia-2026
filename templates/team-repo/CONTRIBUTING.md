@@ -46,7 +46,8 @@ The PR template carries two lines. Both must start at the beginning of a line, o
   `Rule-feedback: P-<slug>, <what you did differently and why>`. It is feedback on the rule, never on a
   person, and the pile is only used to decide whether the rule stays, changes, or the code comes back in line.
   `/rule-feedback` in Claude Code writes the line for you.
-- Only two checks block a merge: `check` (the same `make check` you run locally) and `shutdown-coverage`.
+- Three checks block a merge: `check` (the same `make check` you run locally), `shutdown-coverage`,
+  and `verify` (the kit's agent-hygiene checks: unbacked proofs, empty files, and the like).
   Everything else (the bot review, the template reminder) is advice.
 - Keep PRs small enough that the preview tells the whole story.
 
