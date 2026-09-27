@@ -157,17 +157,30 @@ extract_proof_path_from_text() {
   return 0
 }
 
-# print_request <display-name> <command> <proof-path> <content>: shows a request clearly on the
-# terminal before asking anything, with the command shown exactly as it will run and, when the
-# request names one, where its proof will be written. Every piece of untrusted text is sanitized
-# for display first (control characters, including ANSI/terminal escapes, made visible) so a
-# request can't spoof the screen before the yes/no answer.
+# print_request <display-name> <command> <proof-path> <content> <workspace>: shows a request
+# clearly on the terminal before asking anything, with the command shown exactly as it will run
+# and, when the request names one, where its proof will be written. Every piece of untrusted text
+# is sanitized for display first (control characters, including ANSI/terminal escapes, made
+# visible) so a request can't spoof the screen before the yes/no answer. I3: a command that
+# contains "git" also shows the workspace's own remote URLs, since the command runs from (and as)
+# this workspace, not a clone -- a `git push` here goes wherever *this* workspace's remotes point.
 print_request() {
-  local base="$1" command="$2" proof_path="$3" content="$4"
+  local base="$1" command="$2" proof_path="$3" content="$4" workspace="$5"
 
   printf '\n=== Agent request: %s ===\n' "$base"
   printf 'Command (will run exactly as shown, from the workspace root):\n%s\n\n' \
     "$(sanitize_for_display "$command")"
+  case "$command" in
+    *git*)
+      local remotes
+      remotes="$(git -C "$workspace" remote -v 2>/dev/null)"
+      if [ -n "$remotes" ]; then
+        printf 'Remote URLs (this workspace, not a clone):\n%s\n\n' "$(sanitize_for_display "$remotes")"
+      else
+        printf 'Remote URLs (this workspace, not a clone): (none configured)\n\n'
+      fi
+      ;;
+  esac
   printf 'Why:\n%s\n\n' "$(sanitize_for_display "$(extract_section_from_text "$content" "Why")")"
   printf 'What it changes:\n%s\n\n' \
     "$(sanitize_for_display "$(extract_section_from_text "$content" "What it changes")")"
@@ -311,6 +324,96 @@ write_proof() {
   mv -f -- "$tmp_file" "$final_file"
 }
 
+# I3: approving a command line does not approve what it runs. The command runs from (and as) the
+# agent-owned workspace, never a pristine clone (a clone would break a terraform or
+# uncommitted-work request) -- so `.git/hooks/pre-push`, `core.hooksPath`, `core.fsmonitor`, an
+# alias, or a filter driver the agent set in this same workspace could otherwise turn one
+# innocuous-looking "git push" approval into arbitrary code on the Mac. What follows narrows that
+# gap without a clone: refuse before ever prompting when the workspace's git state itself looks
+# tampered with, and disable hooks/fsmonitor for whatever git the approved command spawns.
+
+# I3: the small set of local/worktree-scope git config keys this broker trusts -- everything a
+# plain `git init` plus a normal clone/checkout sets. Any other local or worktree key
+# (core.hooksPath, core.fsmonitor, an alias, core.sshCommand, a filter driver, ...) can redirect
+# what a "plain" git command actually runs, so it refuses rather than prompts.
+GIT_CONFIG_KEY_ALLOWLIST_EXACT=(
+  core.repositoryformatversion core.filemode core.bare core.logallrefupdates
+  core.ignorecase core.precomposeunicode core.symlinks
+  user.name user.email extensions.worktreeconfig
+)
+
+is_allowed_git_config_key() {
+  local key="$1" a
+  for a in "${GIT_CONFIG_KEY_ALLOWLIST_EXACT[@]}"; do
+    [ "$a" = "$key" ] && return 0
+  done
+  case "$key" in
+    remote.*.url|remote.*.fetch|branch.*.remote|branch.*.merge) return 0 ;;
+  esac
+  return 1
+}
+
+# resolve_git_hooks_dir <workspace>: prints the effective, shared hooks directory for the
+# workspace's repository. Resolved through `git rev-parse --git-common-dir` so a linked (gitfile)
+# worktree still finds the one real hooks directory the main checkout uses, not a path that only
+# makes sense relative to the worktree's own ".git" file.
+resolve_git_hooks_dir() {
+  local workspace="$1" common_dir
+  common_dir="$(git -C "$workspace" rev-parse --git-common-dir 2>/dev/null)" || return 1
+  case "$common_dir" in
+    /*) : ;;
+    *) common_dir="$workspace/$common_dir" ;;
+  esac
+  printf '%s/hooks\n' "$common_dir"
+}
+
+# workspace_has_nonstandard_git_hooks <workspace>: true if the workspace's git hooks directory
+# holds any file that isn't a *.sample template. A real pre-push, post-checkout, or similar hook
+# runs whenever the matching git command does, as the human who approved that command. Sets
+# NONSTANDARD_GIT_HOOK_NAME to the first offending file's name, for the declined reason.
+NONSTANDARD_GIT_HOOK_NAME=""
+workspace_has_nonstandard_git_hooks() {
+  local workspace="$1" hooks_dir f base found=1
+  NONSTANDARD_GIT_HOOK_NAME=""
+  hooks_dir="$(resolve_git_hooks_dir "$workspace")" || return 1
+  [ -d "$hooks_dir" ] || return 1
+  shopt -s nullglob
+  for f in "$hooks_dir"/*; do
+    [ -f "$f" ] || continue
+    base="${f##*/}"
+    case "$base" in
+      *.sample) continue ;;
+    esac
+    NONSTANDARD_GIT_HOOK_NAME="$base"
+    found=0
+    break
+  done
+  shopt -u nullglob
+  return "$found"
+}
+
+# workspace_has_disallowed_git_config <workspace>: true if the workspace's local or
+# worktree-scope git config sets any key outside the allow-list above. Sets
+# DISALLOWED_GIT_CONFIG_KEY to the first offending key for the declined reason. Global and system
+# scope config belongs to the human running the broker, not the agent, and is not checked here.
+DISALLOWED_GIT_CONFIG_KEY=""
+workspace_has_disallowed_git_config() {
+  local workspace="$1" scope keyval key
+  DISALLOWED_GIT_CONFIG_KEY=""
+  while IFS=$'\t' read -r scope keyval; do
+    [ -n "$scope" ] || continue
+    case "$scope" in
+      local|worktree) : ;;
+      *) continue ;;
+    esac
+    key="${keyval%%=*}"
+    is_allowed_git_config_key "$key" && continue
+    DISALLOWED_GIT_CONFIG_KEY="$key"
+    return 0
+  done < <(git -C "$workspace" config --list --show-scope 2>/dev/null)
+  return 1
+}
+
 # run_command <workspace> <result-file> <title> <command> <proof-path>: runs the confirmed command
 # from the workspace root, masks its output, writes the result, and — when a proof path was named
 # and the command exits 0 — writes the proof. <proof-path> was already extracted from the
@@ -320,7 +423,16 @@ run_command() {
   local tmp_out exit_code=0 masked_output proof_note=""
 
   tmp_out="$(mktemp)"
-  ( cd "$workspace" && bash -c "$command" ) >"$tmp_out" 2>&1 || exit_code=$?
+  # I3: disables hooks and fsmonitor for every git the command spawns (a plain invocation, or one
+  # from inside a Makefile, a script, or npm), via the env form so it reaches all of them, not just
+  # a `git` invoked directly.
+  (
+    cd "$workspace" &&
+    GIT_CONFIG_COUNT=2 \
+    GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
+    GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false \
+    bash -c "$command"
+  ) >"$tmp_out" 2>&1 || exit_code=$?
   masked_output="$(mask_secrets < "$tmp_out")"
   rm -f "$tmp_out"
 
@@ -439,7 +551,27 @@ process_request() {
 
   proof_path="$(extract_proof_path_from_text "$content")"
 
-  print_request "$base" "$command" "$proof_path" "$content"
+  # I3: inspect the workspace's own git state before ever prompting. Both are refusals, not
+  # prompts: a compromised workspace shouldn't get a human's "y" trained into it as normal.
+  if workspace_has_nonstandard_git_hooks "$workspace"; then
+    if ! write_result "$result_file" "$title" "declined" \
+      "refused: this workspace's .git/hooks holds $NONSTANDARD_GIT_HOOK_NAME, which isn't a .sample template; approving a command here could run agent-controlled code as you, not just the command shown" \
+      "$command" "" "" ""; then
+      note_result_write_failed "$title"
+    fi
+    return 0
+  fi
+  if workspace_has_disallowed_git_config "$workspace"; then
+    if ! write_result "$result_file" "$title" "declined" \
+      "refused: this workspace's git config sets $DISALLOWED_GIT_CONFIG_KEY, outside the small set this broker trusts; approving a command here could run agent-controlled code as you, not just the command shown" \
+      "$command" "" "" ""; then
+      note_result_write_failed "$title"
+    fi
+    return 0
+  fi
+
+  print_request "$base" "$command" "$proof_path" "$content" "$workspace"
+  printf "Note: commands run in the agent's current workspace, so approving make, a script, npm, or terraform approves the agent's current version of those files.\n"
 
   ask_tty 'Run this command? [y/N] '
   answer="$ASK_TTY_ANSWER"

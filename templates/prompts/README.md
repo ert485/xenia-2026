@@ -9,6 +9,11 @@ is the other half of that), never present a result you didn't get, and end the t
 `REPORT.md`. It is generic: drop it into any repo, alongside that repo's own `TASK.md` (the task's
 actual requirements), and start an unattended run from it.
 
+`scripts/agent-requests.sh` runs an approved command from the agent's own workspace, not a
+pristine clone, so it can only refuse a tampered git state (a planted hook, a stray local config
+key) before prompting — it can't stop a plain-looking `make`, script, npm, or terraform call from
+doing something other than what its request describes.
+
 ## Before starting a run
 
 The base branch must already contain the kit plugin (the Stop hook and the deny hooks) and

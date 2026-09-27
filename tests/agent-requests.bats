@@ -25,6 +25,17 @@ write_request() {
   } > "$file"
 }
 
+# git_init_ws <dir>: a minimal, clean git repository fixture for the I3 tests below.
+git_init_ws() {
+  local dir="$1"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+  git -C "$dir" init -q -b main
+  git -C "$dir" config user.email "fixture@example.invalid"
+  git -C "$dir" config user.name "Fixture"
+  git -C "$dir" commit -q --allow-empty -m init
+}
+
 @test "y runs the command and writes a result with exit code and output" {
   write_request "$WS/.agent-requests/001-echo.md" 'echo hello-world' \
     "smoke test" "read-only" "prints hello-world" "not needed" "nothing else"
@@ -273,4 +284,95 @@ write_request() {
   grep -qF -- 'second-request-ran' "$WS/.agent-requests/002-ok.result.md" || return 1
   [[ "$output" == *'could not write a result for 001-broken'* ]] || return 1
   [[ "$output" == *'ran 002-ok'* ]]
+}
+
+# --- Final review fix wave A: I3 (approving a command line does not approve what it runs) ---
+
+@test "I3: a planted git hook that isn't a .sample is refused without prompting" {
+  git_init_ws "$WS"
+  printf '#!/bin/sh\necho pwned\n' > "$WS/.git/hooks/pre-push"
+  chmod +x "$WS/.git/hooks/pre-push"
+  write_request "$WS/.agent-requests/020-hook.md" 'echo should-not-run' "t" "read-only" "t" "t" "t"
+  printf 'y\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'Run this command?'* ]] || return 1
+  result="$WS/.agent-requests/020-hook.result.md"
+  grep -qF -- '- Status: declined' "$result" || return 1
+  grep -qF -- '.git/hooks' "$result" || return 1
+  grep -qF -- 'pre-push' "$result"
+}
+
+@test "I3: core.fsmonitor in local git config is refused without prompting" {
+  git_init_ws "$WS"
+  git -C "$WS" config core.fsmonitor true
+  write_request "$WS/.agent-requests/021-cfg.md" 'echo should-not-run' "t" "read-only" "t" "t" "t"
+  printf 'y\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'Run this command?'* ]] || return 1
+  result="$WS/.agent-requests/021-cfg.result.md"
+  grep -qF -- '- Status: declined' "$result" || return 1
+  grep -qF -- 'core.fsmonitor' "$result"
+}
+
+@test "I3: a local git alias is refused without prompting" {
+  git_init_ws "$WS"
+  git -C "$WS" config alias.x '!rm -rf /'
+  write_request "$WS/.agent-requests/022-alias.md" 'echo should-not-run' "t" "read-only" "t" "t" "t"
+  printf 'y\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'Run this command?'* ]] || return 1
+  result="$WS/.agent-requests/022-alias.result.md"
+  grep -qF -- '- Status: declined' "$result" || return 1
+  grep -qF -- 'alias.x' "$result"
+}
+
+@test "I3: a clean fixture repo (no planted hooks, no disallowed config) still runs" {
+  git_init_ws "$WS"
+  write_request "$WS/.agent-requests/023-clean.md" 'echo clean-repo-ran' "t" "read-only" "t" "t" "t"
+  printf 'y\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  result="$WS/.agent-requests/023-clean.result.md"
+  grep -qF -- '- Status: ran' "$result" || return 1
+  grep -qF -- '- Exit code: 0' "$result" || return 1
+  grep -qF -- 'clean-repo-ran' "$result"
+}
+
+@test "I3: the env form disabling hooks/fsmonitor reaches the approved command" {
+  git_init_ws "$WS"
+  write_request "$WS/.agent-requests/024-env.md" 'git config core.hooksPath' "t" "read-only" "t" "t" "t"
+  printf 'y\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  result="$WS/.agent-requests/024-env.result.md"
+  grep -qF -- '- Status: ran' "$result" || return 1
+  grep -qF -- '/dev/null' "$result"
+}
+
+@test "I3: a git-shaped request shows the workspace's remote URLs before asking" {
+  git_init_ws "$WS"
+  git -C "$WS" remote add origin "https://example.invalid/kriket-team/example.git"
+  write_request "$WS/.agent-requests/025-remote.md" 'git push origin main' "t" "read-only" "t" "t" "t"
+  printf 'n\n\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'example.invalid/kriket-team/example.git'* ]]
+}
+
+@test "I3: the standing workspace-scope note prints before every yes/no prompt" {
+  write_request "$WS/.agent-requests/026-note.md" 'echo hi' "t" "read-only" "t" "t" "t"
+  printf 'n\n\n' > "$TTY"
+
+  AGENT_REQUESTS_TTY="$TTY" run "$SCRIPT" once "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"commands run in the agent"*"workspace"* ]]
 }
