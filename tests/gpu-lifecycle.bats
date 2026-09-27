@@ -15,6 +15,7 @@ case "\$*" in
   *"sts get-caller-identity"*) echo 111111111 ;;
   *"ec2 describe-instances"*"gpu-box"*)    echo i-0123456789abcdef0 ;;
   *"ec2 describe-instances"*"docker-box"*) echo i-0fedcba9876543210 ;;
+  *"ssm describe-instance-information"*) echo Online ;;
   *"ssm send-command --instance-ids i-0123456789abcdef0"*) echo cmd-vllm-wait ;;
   *"ssm send-command --instance-ids i-0fedcba9876543210"*) echo cmd-gateway ;;
   *"get-command-invocation --command-id cmd-vllm-wait"*"--query Status"*) echo "\${HEALTH_STATUS}" ;;
