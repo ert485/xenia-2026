@@ -83,6 +83,9 @@ jobs:
           # templates/devcontainer/devcontainer.json's XENIA_VERIFY_ARGS for the matching Stop
           # hook setting in team Claude sessions.
           VERIFY_EXTRA_ARGS: "--warn root-files"
+          # A team PR could add its own executable scripts/ci/verify-pr.sh; select the kit's own
+          # checkout by repository identity, not by whether that file happens to exist here.
+          IS_KIT_REPO: ${{ github.repository == 'ert485/xenia-2026' }}
         run: |
-          if [ -x scripts/ci/verify-pr.sh ] && [ -x plugin/scripts/agent-verify.sh ]; then kit=.; else kit=.kit; fi
+          if [ "$IS_KIT_REPO" = "true" ]; then kit=.; else kit=.kit; fi
           "$kit/scripts/ci/verify-pr.sh" "$BASE"

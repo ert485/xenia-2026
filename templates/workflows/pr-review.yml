@@ -229,8 +229,11 @@ jobs:
           ACTION: ${{ github.event.action }}
           ADDED_LABEL: ${{ github.event.label.name }}
           GH_TOKEN: ${{ github.token }}
+          # A team PR could add its own executable scripts/ci/deep-review-trigger.sh; select the
+          # kit's own checkout by repository identity, not by whether that file happens to exist.
+          IS_KIT_REPO: ${{ github.repository == 'ert485/xenia-2026' }}
         run: |
-          if [ -x scripts/ci/deep-review-trigger.sh ]; then kit=.; else kit=.kit; fi
+          if [ "$IS_KIT_REPO" = "true" ]; then kit=.; else kit=.kit; fi
           existing_comment="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
             --jq '[.[] | select(.body | startswith("<!-- xenia-deep-review -->"))] | last | .body // empty' 2>/dev/null)" || existing_comment=""
           set +e

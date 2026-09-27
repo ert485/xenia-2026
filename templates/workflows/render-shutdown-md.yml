@@ -26,8 +26,12 @@ jobs:
           path: .kit
           persist-credentials: false
       - name: SHUTDOWN.md is current
+        env:
+          # A team PR could add its own executable scripts/render-shutdown-md.sh; select the
+          # kit's own checkout by repository identity, not by whether that file happens to exist.
+          IS_KIT_REPO: ${{ github.repository == 'ert485/xenia-2026' }}
         run: |
-          if [ -x scripts/render-shutdown-md.sh ]; then kit=.; else kit=.kit; fi
+          if [ "$IS_KIT_REPO" = "true" ]; then kit=.; else kit=.kit; fi
           if ! "$kit/scripts/render-shutdown-md.sh" shutdown.d | diff -u SHUTDOWN.md -; then
             echo "::error::SHUTDOWN.md is stale: run make shutdown-md and commit (in a team repo: <kit>/scripts/render-shutdown-md.sh shutdown.d > SHUTDOWN.md)"
             exit 1
