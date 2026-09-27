@@ -33,6 +33,9 @@ printf 'docker %s\n' "$*" >> "$CALLS"
 project=""; prev=""
 for a in "$@"; do [[ "$prev" == "-p" ]] && project="$a"; prev="$a"; done
 case "$*" in
+  *" config --format json")
+    if [[ -n "${FAKE_RENDER_FAIL:-}" ]]; then echo "FAKE_RENDER_FAIL: compose could not resolve a variable" >&2; exit 1; fi
+    if [[ -n "${FAKE_RENDER_JSON:-}" ]]; then printf '%s\n' "$FAKE_RENDER_JSON"; else printf '{"services":{"web":{}}}\n'; fi ;;
   "compose ls"*)
     first=1; printf '['
     while read -r p; do
@@ -95,6 +98,32 @@ downs() { grep -oE 'compose -p pr-[0-9]+ down' "$CALLS" | awk '{print $3}' | sor
   FAKE_CHECK_EXIT=1 FAKE_CHECK_MSG="service web: privileged: true" run "$BOX/preview-up.sh" 5 ert485/xenia-2026 "$SHA" .
   [ "$status" -ne 0 ]
   [[ "$output" == *"preview refused"* ]] || return 1
+  [ -z "$(downs)" ]
+  ! grep -q ' up -d' "$CALLS"
+}
+
+@test "an interpolated privileged (resolved true by the render) is refused before any build or up" {
+  cat > "$BOX/compose-check.py" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+if doc.get("services", {}).get("web", {}).get("privileged") is True:
+    print("service web: privileged: true")
+    sys.exit(1)
+sys.exit(0)
+PY
+  FAKE_RENDER_JSON='{"services":{"web":{"privileged":true}}}' run "$BOX/preview-up.sh" 5 ert485/xenia-2026 "$SHA" .
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"preview refused"* ]] || return 1
+  [[ "$output" == *"service web: privileged: true"* ]] || return 1
+  [ -z "$(downs)" ]
+  ! grep -q ' up -d' "$CALLS"
+  ! grep -q ' build' "$CALLS"
+}
+
+@test "a compose file that fails to render refuses the preview before any build or up" {
+  FAKE_RENDER_FAIL=1 run "$BOX/preview-up.sh" 5 ert485/xenia-2026 "$SHA" .
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not be rendered"* ]] || return 1
   [ -z "$(downs)" ]
   ! grep -q ' up -d' "$CALLS"
 }

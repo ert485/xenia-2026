@@ -53,6 +53,12 @@ aws ecr get-login-password --region ca-central-1 | docker login --username AWS -
 apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app \
   --with-decryption --output json)"
 
+# Preview isolation, run for a real deploy too (C2 of the final review): before this, only preview
+# builds were checked, so merging to main (self-merge, no human review once CI is green) was the
+# bypass. Checked again, from scratch, before every deploy_image call below (see check_before_deploy),
+# so a compose change reached only through main still gets refused.
+check_deploy_isolation "$dir" "$compose"
+
 dc() { docker compose -p app --project-directory "$dir" -f "$compose" -f "$here/../app/compose.app.yml" "$@"; }
 
 # deploy_image <image>: pull and bring <image> up as app-web. Just the compose steps, no bookkeeping
@@ -117,6 +123,7 @@ if [[ -z "$prev_image" ]]; then
   exit 2
 fi
 
+check_deploy_isolation "$dir" "$compose"
 deploy_image "$prev_image"
 
 log "waiting up to ${HEALTH_TIMEOUT}s for the rollback to $prev_image to answer healthy"

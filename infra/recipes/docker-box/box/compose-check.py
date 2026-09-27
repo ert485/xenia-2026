@@ -112,6 +112,8 @@ def check_service(reasons, warnings, name, svc, project_dir):
             reasons.append(f"{where}: {key}: {value}")
         elif "$" in value:
             reasons.append(f"{where}: variable in {key}")
+    if svc.get("cgroup_parent"):
+        reasons.append(f"{where}: cgroup_parent is not allowed in a preview")
     for cap in svc.get("cap_add") or []:
         if str(cap).upper().removeprefix("CAP_") in DANGEROUS_CAPS:
             reasons.append(f"{where}: cap_add {cap}")
@@ -120,6 +122,10 @@ def check_service(reasons, warnings, name, svc, project_dir):
             reasons.append(f"{where}: security_opt {opt}")
     if svc.get("devices"):
         reasons.append(f"{where}: devices are not allowed in a preview")
+    if svc.get("device_cgroup_rules"):
+        reasons.append(f"{where}: device_cgroup_rules is not allowed in a preview")
+    if svc.get("sysctls"):
+        reasons.append(f"{where}: sysctls is not allowed in a preview")
     if svc.get("volumes_from"):
         reasons.append(f"{where}: volumes_from is not allowed in a preview")
     if svc.get("external_links"):
@@ -135,10 +141,19 @@ def check_service(reasons, warnings, name, svc, project_dir):
         check_path(reasons, where, "env_file", path, project_dir)
     if "build" in svc:
         check_build(reasons, where, svc["build"], project_dir)
+    if name != "web" and svc.get("container_name"):
+        reasons.append(f"{where}: container_name is not allowed on a non-web service (it could claim app-web)")
     nets = svc.get("networks") or []
-    for net in (nets if isinstance(nets, list) else nets.keys()):
-        if str(net) == "gateway":
-            reasons.append(f"{where}: joins the gateway network")
+    if isinstance(nets, dict):
+        for net_name, net_cfg in nets.items():
+            if str(net_name) == "gateway":
+                reasons.append(f"{where}: joins the gateway network")
+            if str(net_name) == "edge" and name != "web" and isinstance(net_cfg, dict) and net_cfg.get("aliases"):
+                reasons.append(f"{where}: sets aliases on the edge network (it could shadow a name Caddy resolves)")
+    else:
+        for net_name in nets:
+            if str(net_name) == "gateway":
+                reasons.append(f"{where}: joins the gateway network")
     if svc.get("ports"):
         warnings.append(f"warning: {where}: ports are ignored in previews (the kit's override resets them; Caddy routes pr-<n>.box.)")
 

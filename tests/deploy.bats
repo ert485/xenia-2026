@@ -39,6 +39,9 @@ case "$*" in
   login*)
     cat >/dev/null
     exit 0 ;;
+  *" config --format json")
+    if [[ -n "${FAKE_RENDER_FAIL:-}" ]]; then echo "FAKE_RENDER_FAIL: compose could not resolve a variable" >&2; exit 1; fi
+    if [[ -n "${FAKE_RENDER_JSON:-}" ]]; then printf '%s\n' "$FAKE_RENDER_JSON"; else printf '{"services":{"web":{}}}\n'; fi ;;
   inspect*)
     if [[ -s "$RUNNING_IMAGE" ]]; then cat "$RUNNING_IMAGE"; exit 0; fi
     exit 1 ;;
@@ -162,6 +165,24 @@ compose() { printf '%b' "$1" > "$TMP/compose.yml"; }
   [ ! -f "$APP_STATE_DIR/previous" ]
   [ "$(grep -c ' up -d --no-build --remove-orphans' "$CALLS")" -eq 1 ]
   [[ "$output" == *"no previous image"* ]]
+}
+
+@test "an interpolated privileged (resolved true by the render) is refused before any up, on both the primary deploy and the revert" {
+  printf '%s\n' "$OLD_IMAGE" > "$RUNNING_IMAGE"
+  FAKE_RENDER_JSON='{"services":{"web":{"privileged":true}}}' HEALTH_TIMEOUT=1 HEALTH_POLL_INTERVAL=1 \
+    run "$DEPLOY" ert485/xenia-2026 "$SHA" "$NEW_BAD_IMAGE" .
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"preview refused"* ]] || return 1
+  [[ "$output" == *"service web: privileged: true"* ]] || return 1
+  [ "$(grep -c ' up -d --no-build --remove-orphans' "$CALLS")" -eq 0 ]
+}
+
+@test "a compose file that fails to render refuses the deploy before any up" {
+  FAKE_RENDER_FAIL=1 HEALTH_TIMEOUT=1 HEALTH_POLL_INTERVAL=1 run "$DEPLOY" ert485/xenia-2026 "$SHA" "$NEW_GOOD_IMAGE" .
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not be rendered"* ]] || return 1
+  [[ "$output" == *"FAKE_RENDER_FAIL: compose could not resolve a variable"* ]] || return 1
+  [ "$(grep -c ' up -d --no-build --remove-orphans' "$CALLS")" -eq 0 ]
 }
 
 @test "HEALTH_TIMEOUT=abc is refused" {
