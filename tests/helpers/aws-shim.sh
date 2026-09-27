@@ -13,5 +13,7 @@ case "$*" in
   *"dynamodb describe-table"*)      [[ -f "$FAKE_STATE/table" ]] ;;
   *"dynamodb create-table"*)        touch "$FAKE_STATE/table" ;;
   *"dynamodb wait"*)                exit 0 ;;
+  *"ssm get-parameters-by-path"*)
+    [[ -n "${FAKE_APP_PARAMS:-}" ]] && cat "$FAKE_APP_PARAMS" ;;
   *) exit 0 ;;
 esac

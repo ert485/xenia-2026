@@ -39,11 +39,12 @@ export IMAGE="$image" APP_PORT GIT_SHA="$sha"
 # App secrets and settings: every /xenia/app/<NAME> parameter (written from the laptop with
 # scripts/put-secret.sh app/<NAME>) becomes NAME in the environment compose renders the team's file
 # with. The value never touches the disk or a command line. No parameters: nothing is exported.
-while IFS=$'\t' read -r name value; do
-  [[ -n "$name" ]] || continue
-  export "${name##*/}=$value"
-done < <(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption \
-  --query 'Parameters[].[Name,Value]' --output text)
+# Read as JSON, not the old --output text: apply_ssm_app_params (lib.sh) only accepts names that
+# are shell-identifier-shaped and not reserved (PATH, HEALTH_*, IMAGE, ...), skipping anything else
+# with a log line that never includes the value — an unusual name used to abort the whole deploy
+# with the secret printed into this (public repo) job's log; see lib.sh for the full writeup.
+apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app \
+  --with-decryption --output json)"
 
 dc() { docker compose -p app --project-directory "$dir" -f "$compose" -f "$here/../app/compose.app.yml" "$@"; }
 dc pull --quiet web

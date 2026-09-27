@@ -29,6 +29,50 @@ ssm_get() {
     --query Parameter.Value --output text
 }
 
+# _app_secret_reserved <name>: true if <name> collides with a shell/system internal, or with a
+# variable deploy.sh or the compose stack already defines. Kept as a case, not an array, so it
+# behaves the same under bash 3.2 (macOS, where this is unit-tested) and bash 5 (the Docker box).
+# scripts/put-secret.sh carries the same list (it can't source this box-only file from the
+# laptop) — keep the two in sync by hand.
+_app_secret_reserved() {
+  case "$1" in
+    PATH|HOME|IFS|SHELL|BASH_ENV|ENV|PS4|PROMPT_COMMAND|IMAGE|GIT_SHA|ZONE) return 0 ;;
+    LD_*|APP_*|HEALTH_*|KIT_*|BOX_*|XENIA_*|DOCKER_*|COMPOSE_*|AWS_*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# apply_ssm_app_params <json>: <json> is the stdout of
+#   aws ssm get-parameters-by-path --path /xenia/app --with-decryption --output json
+# (a {"Parameters": [{"Name": ..., "Value": ...}, ...]} document). For each parameter, exports the
+# part of its name after the last "/" — but only when that part matches ^[A-Z_][A-Z0-9_]*$ and
+# isn't reserved (_app_secret_reserved); anything else is skipped with one log line naming the
+# parameter's path, never its value. Reading JSON (not the old --output text, which used tabs and
+# newlines as the row/column separators) keeps a multi-line value, such as a PEM key or
+# pretty-printed JSON, intact as one field instead of splitting it across "rows". A rejected name
+# is exactly what would otherwise blow up bash's `export NAME=value` (not a valid identifier) or
+# silently override a variable the script or compose stack relies on — see the deploy.sh comment
+# above the call site. NEVER print, echo, or otherwise trace a value here: no `set -x`, and no
+# error path may include one.
+apply_ssm_app_params() {
+  local json="$1" line path name value
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    path="$(jq -r '.Name' <<<"$line")"
+    name="${path##*/}"
+    if [[ ! "$name" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+      log "app secrets: skipping $path (name must be A-Z, 0-9, _ only, and not start with a digit)"
+      continue
+    fi
+    if _app_secret_reserved "$name"; then
+      log "app secrets: skipping $path (name $name is reserved by the deploy script or compose)"
+      continue
+    fi
+    value="$(jq -r '.Value' <<<"$line")"
+    export "$name=$value"
+  done < <(jq -c '.Parameters[]?' <<<"$json")
+}
+
 # vllm_probe <api_base> <token> <placeholder>: prints the api_base the gateway should use. The
 # gpu-box stack writes /xenia/gpu/api-base once and never clears it, so it keeps naming the GPU
 # box's EIP even with no GPU instance running (EC2 capacity) or while the box is stopped — an
