@@ -71,6 +71,18 @@ EOF
   [ -f "$SHUTDOWN_DIR/50-bar.sh" ]
 }
 
+@test "shutdown-entry leaves SHUTDOWN.md up to date" {
+  export SHUTDOWN_DIR="$TMP/shutdown.d"
+  run plugin/scripts/shutdown-entry.sh foo "the foo queue workers" "scripts/foo-start.sh" "about \$0.10/hour" "true"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"regenerated $TMP/SHUTDOWN.md"* ]] || return 1
+  [ -f "$TMP/SHUTDOWN.md" ]
+  want="$(plugin/scripts/render-shutdown-md.sh "$SHUTDOWN_DIR")"
+  got="$(cat "$TMP/SHUTDOWN.md")"
+  [ "$got" = "$want" ] || return 1
+  [[ "$got" == *"| \`40-foo.sh\` | the foo queue workers |"* ]]
+}
+
 @test "the generated entry honours DRY_RUN and otherwise runs the stop command" {
   export SHUTDOWN_DIR="$TMP/shutdown.d"
   plugin/scripts/shutdown-entry.sh foo "foo" "x" "free" "touch $TMP/stopped"

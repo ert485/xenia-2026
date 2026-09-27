@@ -38,4 +38,16 @@ who="$(git config user.name 2>/dev/null || echo unknown)"
 chmod +x "$out"
 bash -n "$out"
 echo "wrote $out"
+
+# Regenerate SHUTDOWN.md so this new entry (and the PR that adds it) doesn't fail render-shutdown-md
+# for being stale. render-shutdown-md.sh is this script's sibling, vendored the same way.
+renderer="$(dirname "$0")/render-shutdown-md.sh"
+md="$(cd "$dir/.." && pwd)/SHUTDOWN.md"
+if [[ -x "$renderer" ]]; then
+  "$renderer" "$dir" > "$md.tmp" && mv "$md.tmp" "$md"
+  echo "regenerated $md"
+else
+  echo "shutdown-entry: warning: $renderer is missing; regenerate SHUTDOWN.md by hand (make shutdown-md, or plugin/scripts/render-shutdown-md.sh shutdown.d > SHUTDOWN.md)" >&2
+fi
+
 echo "Teammate: commit it in the same PR as the billable change; the Shutdown: line is then not needed."

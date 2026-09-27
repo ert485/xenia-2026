@@ -6,6 +6,7 @@ on:
       - "shutdown.d/**"
       - "SHUTDOWN.md"
       - "scripts/render-shutdown-md.sh"
+      - "plugin/scripts/render-shutdown-md.sh"
 permissions: {}
 jobs:
   render-shutdown-md:
@@ -33,6 +34,6 @@ jobs:
         run: |
           if [ "$IS_KIT_REPO" = "true" ]; then kit=.; else kit=.kit; fi
           if ! "$kit/scripts/render-shutdown-md.sh" shutdown.d | diff -u SHUTDOWN.md -; then
-            echo "::error::SHUTDOWN.md is stale: run make shutdown-md and commit (in a team repo: <kit>/scripts/render-shutdown-md.sh shutdown.d > SHUTDOWN.md)"
+            echo "::error::SHUTDOWN.md is stale: run make shutdown-md and commit (in a team repo: plugin/scripts/render-shutdown-md.sh shutdown.d > SHUTDOWN.md)"
             exit 1
           fi
