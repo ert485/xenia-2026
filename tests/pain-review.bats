@@ -62,14 +62,14 @@ SH
   run --separate-stderr scripts/pain-review.sh --repo ert485/xenia-test-team --no-model
   [ "$status" -eq 0 ]
   body="$(cat "$FAKE/pinned-body.md")"
-  [[ "$body" == *"<!-- xenia-rule-feedback -->"* ]]
-  [[ "$body" == *"## P-two-gates (2)"* ]]
-  [[ "$body" == *"## P-off-switch (1)"* ]]
-  [[ "$body" == *"- #12 (PR): merged a docs-only hotfix while check was red"* ]]
-  [[ "$body" == *"- #15 (PR): demo fix merged before check finished"* ]]
-  [[ "$body" == *"- #20 (issue): Console bucket for demo assets"* ]]
-  [[ "$body" != *"P-wheel"* && "$body" != *"P-public ("* && "$body" != *"#16"* ]]
-  [[ "$body" != *$'\r'* ]]
+  [[ "$body" == *"<!-- xenia-rule-feedback -->"* ]] || return 1
+  [[ "$body" == *"## P-two-gates (2)"* ]] || return 1
+  [[ "$body" == *"## P-off-switch (1)"* ]] || return 1
+  [[ "$body" == *"- #12 (PR): merged a docs-only hotfix while check was red"* ]] || return 1
+  [[ "$body" == *"- #15 (PR): demo fix merged before check finished"* ]] || return 1
+  [[ "$body" == *"- #20 (issue): Console bucket for demo assets"* ]] || return 1
+  [[ "$body" != *"P-wheel"* && "$body" != *"P-public ("* && "$body" != *"#16"* ]] || return 1
+  [[ "$body" != *$'\r'* ]] || return 1
   # the larger group comes first
   [ "$(grep -n '^## P-two-gates' "$FAKE/pinned-body.md" | cut -d: -f1)" -lt "$(grep -n '^## P-off-switch' "$FAKE/pinned-body.md" | cut -d: -f1)" ]
   grep -q '^issue edit 1 --repo ert485/xenia-test-team --body-file' "$GH_CALLS"
@@ -78,9 +78,9 @@ SH
 @test "--dry-run prints the body and writes nothing" {
   run --separate-stderr scripts/pain-review.sh --repo ert485/xenia-test-team --dry-run --post
   [ "$status" -eq 0 ]
-  [[ "$output" == *"## P-two-gates (2)"* ]]
-  [[ "$output" == *"would open next-fix issue: Skip slow tests on docs-only PRs"* ]]
-  ! grep -qE '^issue (edit|create|pin)' "$GH_CALLS"
+  [[ "$output" == *"## P-two-gates (2)"* ]] || return 1
+  [[ "$output" == *"would open next-fix issue: Skip slow tests on docs-only PRs"* ]] || return 1
+  ! grep -qE '^issue (edit|create|pin)' "$GH_CALLS" || return 1
   [ ! -f "$FAKE/notified" ]
 }
 
@@ -101,7 +101,7 @@ SH
   echo '[{"number":41,"title":"Skip slow tests on docs-only PRs"}]' > "$FAKE/next-fix.json"
   run --separate-stderr scripts/pain-review.sh --repo ert485/xenia-test-team
   [ "$status" -eq 0 ]
-  ! grep -q '^issue create' "$GH_CALLS"
+  ! grep -q '^issue create' "$GH_CALLS" || return 1
   [[ "$stderr" == *"already open as #41"* ]]
 }
 
@@ -110,9 +110,9 @@ SH
   run --separate-stderr scripts/pain-review.sh --repo ert485/xenia-test-team --post
   [ "$status" -eq 0 ]
   grep -q '## P-two-gates (2)' "$FAKE/pinned-body.md"
-  ! grep -q 'Bot reading' "$FAKE/pinned-body.md"
-  ! grep -q '^issue create' "$GH_CALLS"
-  [[ "$stderr" == *"falling back to the deterministic grouping"* ]]
+  ! grep -q 'Bot reading' "$FAKE/pinned-body.md" || return 1
+  ! grep -q '^issue create' "$GH_CALLS" || return 1
+  [[ "$stderr" == *"falling back to the deterministic grouping"* ]] || return 1
   grep -q 'rule-feedback pile updated' "$FAKE/notified"
 }
 
