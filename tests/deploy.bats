@@ -185,6 +185,58 @@ compose() { printf '%b' "$1" > "$TMP/compose.yml"; }
   [ "$(grep -c ' up -d --no-build --remove-orphans' "$CALLS")" -eq 0 ]
 }
 
+@test "M10: the app secret reaches docker compose's render and up on both the primary deploy and the revert, and never deploy.sh's own environment" {
+  printf '%s\n' "$OLD_IMAGE" > "$RUNNING_IMAGE"
+  app_params_fixture "$TMP/params.json"
+  export FAKE_APP_PARAMS="$TMP/params.json"
+  export ENV_LOG="$TMP/env-log"; : > "$ENV_LOG"
+  cat > "$BIN/docker" <<'SH'
+#!/usr/bin/env bash
+printf 'docker %s\n' "$*" >> "$CALLS"
+case "$*" in
+  login*)
+    cat >/dev/null
+    exit 0 ;;
+  *" config --format json")
+    { echo "--- config --format json ---"; env; } >> "$ENV_LOG"
+    printf '{"services":{"web":{}}}\n' ;;
+  inspect*)
+    if [[ -s "$RUNNING_IMAGE" ]]; then cat "$RUNNING_IMAGE"; exit 0; fi
+    exit 1 ;;
+  *" up -d --no-build --remove-orphans")
+    { echo "--- up -d ---"; env; } >> "$ENV_LOG"
+    printf '%s\n' "$IMAGE" > "$RUNNING_IMAGE"
+    exit 0 ;;
+  *)
+    exit 0 ;;
+esac
+SH
+  chmod +x "$BIN/docker"
+  # curl is never handed the secret_env array (the health check doesn't need it): if STRIPE_KEY
+  # were still exported into deploy.sh's own environment (the old, pre-array behaviour), it would
+  # leak here too, since a subprocess inherits every exported variable regardless of any explicit
+  # `env NAME=value` prefix on a different command.
+  cat > "$BIN/curl" <<'SH'
+#!/usr/bin/env bash
+printf 'curl %s\n' "$*" >> "$CALLS"
+env >> "$ENV_LOG.curl"
+img="$(cat "$RUNNING_IMAGE" 2>/dev/null || true)"
+case "$img" in
+  *bad*) exit 1 ;;
+  "") exit 1 ;;
+  *) exit 0 ;;
+esac
+SH
+  chmod +x "$BIN/curl"
+  HEALTH_TIMEOUT=1 HEALTH_POLL_INTERVAL=1 run "$DEPLOY" ert485/xenia-2026 "$SHA" "$NEW_BAD_IMAGE" .
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"rolled back to $OLD_IMAGE"* ]] || return 1
+  [ "$(grep -c '^--- config --format json ---$' "$ENV_LOG")" -ge 2 ] || return 1
+  [ "$(grep -c '^--- up -d ---$' "$ENV_LOG")" -eq 2 ] || return 1
+  [ "$(grep -cx 'STRIPE_KEY=sk_test_FAKEVALUE123' "$ENV_LOG")" -ge 4 ] || return 1
+  ! grep -qx 'STRIPE_KEY=sk_test_FAKEVALUE123' "$ENV_LOG.curl"
+}
+
 @test "HEALTH_TIMEOUT=abc is refused" {
   HEALTH_TIMEOUT=abc run "$DEPLOY" ert485/xenia-2026 "$SHA" "$NEW_GOOD_IMAGE" .
   [ "$status" -eq 1 ]
@@ -192,13 +244,15 @@ compose() { printf '%b' "$1" > "$TMP/compose.yml"; }
   [[ "$output" == *"positive integer"* ]]
 }
 
-# --- apply_ssm_app_params (box/lib.sh): validates + exports /xenia/app/<NAME> parameters that
-# deploy.sh reads as JSON instead of the old --output text loop. Sourced and unit-tested here
-# (like ensure_networks in tests/ensure-networks.bats) rather than driven through a full
-# deploy.sh run: deploy.sh clones into the hardcoded /srv/app/src, a path this repo (and CI) has
-# no write access to outside the real Docker box.
+# --- apply_ssm_app_params (box/lib.sh): validates /xenia/app/<NAME> parameters that deploy.sh
+# reads as JSON instead of the old --output text loop, and appends the accepted ones to the
+# caller's `secret_env` array as NAME=value (I4/M10 of the final review: never exported into this
+# script's own environment — only ever handed to `docker compose` via `env "${secret_env[@]}"`).
+# Sourced and unit-tested here (like ensure_networks in tests/ensure-networks.bats) rather than
+# driven through a full deploy.sh run: deploy.sh clones into the hardcoded /srv/app/src, a path
+# this repo (and CI) has no write access to outside the real Docker box.
 
-@test "apply_ssm_app_params: a valid name reaches the environment docker compose would see" {
+@test "apply_ssm_app_params: a valid name reaches secret_env, and only reaches docker compose through env, never this shell's own environment" {
   app_params_fixture "$TMP/params.json"
   export FAKE_APP_PARAMS="$TMP/params.json"
   export ENV_DUMP="$TMP/env-dump"
@@ -209,11 +263,14 @@ exit 0
 EOF
   chmod +x "$BIN/docker"
   run bash -c '
+    declare -a secret_env=()
     source "$LIB"
     apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption --output json)"
-    docker compose up
+    [[ -z "${STRIPE_KEY:-}" ]] && echo "not in this shell"
+    env "${secret_env[@]}" docker compose up
   '
   [ "$status" -eq 0 ]
+  [[ "$output" == *"not in this shell"* ]] || return 1
   grep -qx "STRIPE_KEY=sk_test_FAKEVALUE123" "$ENV_DUMP"
 }
 
@@ -221,6 +278,7 @@ EOF
   app_params_fixture "$TMP/params.json"
   export FAKE_APP_PARAMS="$TMP/params.json"
   run bash -c '
+    declare -a secret_env=()
     source "$LIB"
     apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption --output json)"
     echo deploy-continued
@@ -230,32 +288,42 @@ EOF
   [[ "$output" != *"SECRET-VALUE-123"* ]]
 }
 
-@test "apply_ssm_app_params: a multi-line value arrives intact" {
+@test "apply_ssm_app_params: a multi-line value arrives intact as one secret_env entry" {
   app_params_fixture "$TMP/params.json"
   export FAKE_APP_PARAMS="$TMP/params.json"
   # 2>/dev/null: the fixture's other, deliberately-rejected entries each log one skip line (to
   # stderr, which `run` merges into $output); this test only cares about MULTILINE_CFG's value.
   run bash -c '
+    declare -a secret_env=()
     source "$LIB"
     apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption --output json)" 2>/dev/null
-    printf "%s" "$MULTILINE_CFG"
+    for e in "${secret_env[@]}"; do
+      case "$e" in MULTILINE_CFG=*) printf "%s" "${e#MULTILINE_CFG=}" ;; esac
+    done
   '
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'fake-line-one\nfake-line-two\nfake-line-three')" ]
 }
 
-@test "apply_ssm_app_params: PATH and HEALTH_URL are skipped (reserved names)" {
+@test "apply_ssm_app_params: PATH and HEALTH_URL are skipped (reserved names), never added to secret_env" {
   app_params_fixture "$TMP/params.json"
   export FAKE_APP_PARAMS="$TMP/params.json"
   run bash -c '
     orig_path="$PATH"
     orig_health="${HEALTH_URL:-}"
+    declare -a secret_env=()
     source "$LIB"
     apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app --with-decryption --output json)"
     [[ "$PATH" == "$orig_path" ]] && echo "PATH unchanged"
     [[ "${HEALTH_URL:-}" == "$orig_health" ]] && echo "HEALTH_URL unchanged"
+    for e in "${secret_env[@]}"; do
+      case "$e" in PATH=*|HEALTH_URL=*) echo "LEAKED: $e" ;; esac
+    done
+    echo "secret_env has ${#secret_env[@]} entries"
   '
   [ "$status" -eq 0 ]
   [[ "$output" == *"PATH unchanged"* ]] || return 1
-  [[ "$output" == *"HEALTH_URL unchanged"* ]]
+  [[ "$output" == *"HEALTH_URL unchanged"* ]] || return 1
+  [[ "$output" != *"LEAKED"* ]] || return 1
+  [[ "$output" == *"secret_env has 2 entries"* ]]
 }

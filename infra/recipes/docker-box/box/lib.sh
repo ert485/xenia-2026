@@ -47,16 +47,24 @@ _app_secret_reserved() {
 
 # apply_ssm_app_params <json>: <json> is the stdout of
 #   aws ssm get-parameters-by-path --path /xenia/app --with-decryption --output json
-# (a {"Parameters": [{"Name": ..., "Value": ...}, ...]} document). For each parameter, exports the
-# part of its name after the last "/" — but only when that part matches ^[A-Z_][A-Z0-9_]*$ and
-# isn't reserved (_app_secret_reserved); anything else is skipped with one log line naming the
-# parameter's path, never its value. Reading JSON (not the old --output text, which used tabs and
-# newlines as the row/column separators) keeps a multi-line value, such as a PEM key or
-# pretty-printed JSON, intact as one field instead of splitting it across "rows". A rejected name
-# is exactly what would otherwise blow up bash's `export NAME=value` (not a valid identifier) or
-# silently override a variable the script or compose stack relies on — see the deploy.sh comment
-# above the call site. NEVER print, echo, or otherwise trace a value here: no `set -x`, and no
-# error path may include one.
+# (a {"Parameters": [{"Name": ..., "Value": ...}, ...]} document). For each parameter, appends
+# "NAME=value" (the part of its name after the last "/") to the caller's `secret_env` array — but
+# only when that part matches ^[A-Z_][A-Z0-9_]*$ and isn't reserved (_app_secret_reserved); anything
+# else is skipped with one log line naming the parameter's path, never its value. Reading JSON (not
+# the old --output text, which used tabs and newlines as the row/column separators) keeps a
+# multi-line value, such as a PEM key or pretty-printed JSON, intact as one field instead of
+# splitting it across "rows". A rejected name is exactly what would otherwise blow up bash's
+# `export NAME=value` (not a valid identifier) or silently override a variable the script or
+# compose stack relies on — see the deploy.sh comment above the call site.
+#
+# Appends to `secret_env` (declared by the caller, e.g. `declare -a secret_env=()`) instead of
+# exporting: an accepted secret only ever reaches `docker compose` (via `env "${secret_env[@]}"
+# docker compose ...`), never this script's own environment, so a name that collides with
+# something the deploy script itself reads (PATH, HOME, IFS, ...) can't retarget what deploy.sh
+# runs as root — _app_secret_reserved already refuses those names outright, this is defence in
+# depth for anything the reserved list misses. bash 3.2 (where this is unit-tested) has no
+# namerefs, so the array name is fixed by convention, not passed as a parameter. NEVER print, echo,
+# or otherwise trace a value here: no `set -x`, and no error path may include one.
 apply_ssm_app_params() {
   local json="$1" line path name value
   while IFS= read -r line; do
@@ -72,7 +80,7 @@ apply_ssm_app_params() {
       continue
     fi
     value="$(jq -r '.Value' <<<"$line")"
-    export "$name=$value"
+    secret_env+=("$name=$value")
   done < <(jq -c '.Parameters[]?' <<<"$json")
 }
 

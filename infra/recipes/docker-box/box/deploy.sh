@@ -43,23 +43,42 @@ registry="${image%%/*}"
 aws ecr get-login-password --region ca-central-1 | docker login --username AWS --password-stdin "$registry" >/dev/null
 
 # App secrets and settings: every /xenia/app/<NAME> parameter (written from the laptop with
-# scripts/put-secret.sh app/<NAME>) becomes NAME in the environment compose renders the team's file
-# with. The value never touches the disk or a command line. No parameters: nothing is exported.
-# Read as JSON, not the old --output text: apply_ssm_app_params (lib.sh) only accepts names that
-# are shell-identifier-shaped and not reserved (PATH, HEALTH_*, IMAGE, ...), skipping anything else
-# with a log line that never includes the value — an unusual name used to abort the whole deploy
-# with the secret printed into this (public repo) job's log; see lib.sh for the full writeup.
-# Applied once, here, so deploy_image below runs with them for both the deploy and the revert.
+# scripts/put-secret.sh app/<NAME>) becomes NAME=value in the secret_env array below, passed only
+# to `docker compose` (via dc, and to check_deploy_isolation's render) — never exported into this
+# script's own environment, so a name that collides with something deploy.sh itself reads can't
+# retarget what it runs as root (I4/M10 of the final review; _app_secret_reserved already refuses
+# those names, this is defence in depth). The value never touches the disk or a command line. No
+# parameters: the array stays empty. Read as JSON, not the old --output text: apply_ssm_app_params
+# (lib.sh) only accepts names that are shell-identifier-shaped and not reserved (PATH, HEALTH_*,
+# IMAGE, ...), skipping anything else with a log line that never includes the value — an unusual
+# name used to abort the whole deploy with the secret printed into this (public repo) job's log;
+# see lib.sh for the full writeup. Applied once, here, so both the deploy and the revert see it.
+declare -a secret_env=()
 apply_ssm_app_params "$(aws ssm get-parameters-by-path --region ca-central-1 --path /xenia/app \
   --with-decryption --output json)"
 
-# Preview isolation, run for a real deploy too (C2 of the final review): before this, only preview
-# builds were checked, so merging to main (self-merge, no human review once CI is green) was the
-# bypass. Checked again, from scratch, before every deploy_image call below (see check_before_deploy),
-# so a compose change reached only through main still gets refused.
-check_deploy_isolation "$dir" "$compose"
+# check_before_deploy: preview isolation, run for a real deploy too (C2 of the final review) —
+# before this, only preview builds were checked, so merging to main (self-merge, no human review
+# once CI is green) was the bypass. Re-checked, from scratch, before every deploy_image call below
+# (both the primary deploy and the revert), against whatever $dir/$compose currently point at.
+check_before_deploy() {
+  if [[ "${#secret_env[@]}" -gt 0 ]]; then
+    check_deploy_isolation "$dir" "$compose" "${secret_env[@]}"
+  else
+    check_deploy_isolation "$dir" "$compose"
+  fi
+}
+check_before_deploy
 
-dc() { docker compose -p app --project-directory "$dir" -f "$compose" -f "$here/../app/compose.app.yml" "$@"; }
+# dc: the team's compose plus the kit's trusted override, as project "app". Secrets reach only this
+# (and check_before_deploy's render) via `env`, never this script's own environment.
+dc() {
+  if [[ "${#secret_env[@]}" -gt 0 ]]; then
+    env "${secret_env[@]}" docker compose -p app --project-directory "$dir" -f "$compose" -f "$here/../app/compose.app.yml" "$@"
+  else
+    docker compose -p app --project-directory "$dir" -f "$compose" -f "$here/../app/compose.app.yml" "$@"
+  fi
+}
 
 # deploy_image <image>: pull and bring <image> up as app-web. Just the compose steps, no bookkeeping
 # side effects — this same function runs for both the primary deploy below and, on a failed health
@@ -123,7 +142,7 @@ if [[ -z "$prev_image" ]]; then
   exit 2
 fi
 
-check_deploy_isolation "$dir" "$compose"
+check_before_deploy
 deploy_image "$prev_image"
 
 log "waiting up to ${HEALTH_TIMEOUT}s for the rollback to $prev_image to answer healthy"
