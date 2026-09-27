@@ -124,7 +124,7 @@ else
   git symbolic-ref HEAD refs/heads/main
 fi
 mkdir -p .github/workflows .github/ISSUE_TEMPLATE .devcontainer shutdown.d
-for wf in check shutdown-coverage render-shutdown-md pr-review deploy-docker-box preview-up preview-down devcontainer-image; do
+for wf in check shutdown-coverage render-shutdown-md pr-review pain-review pr-template-check deploy-docker-box preview-up preview-down devcontainer-image; do
   if [[ -f "$KIT_ROOT/templates/workflows/$wf.yml" ]]; then cp "$KIT_ROOT/templates/workflows/$wf.yml" .github/workflows/
   else log "warning: templates/workflows/$wf.yml is missing from the kit; skipped (re-run once it exists)"; fi
 done
