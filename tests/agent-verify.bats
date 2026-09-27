@@ -56,7 +56,7 @@ status_json() { jq -r "$1" "$REPO/.agent/STATUS.json"; }
   [ "$(status_json 'keys | length')" -eq 8 ]
 }
 
-@test "replay Task 15: a fake proof is blocked until a result file backs it" {
+@test "replay Task 15: a fake proof is blocked until a broker-shaped result file backs it" {
   echo "Expected output (example)" > "$REPO/docs/proofs/2026-09-25-status.md"
   git -C "$REPO" add -A
   git -C "$REPO" commit -qm "fake proof"
@@ -67,11 +67,75 @@ status_json() { jq -r "$1" "$REPO/.agent/STATUS.json"; }
   msg=$(status_json '.reasons[] | select(.check=="proofs-unbacked") | .message')
   [[ "$msg" == *"docs/proofs/2026-09-25-status.md"* ]] || return 1
 
+  # A broker-shaped result: the exact lines write_result/write_proof produce for a command the
+  # broker actually ran to completion (Task 34's real format), not a bare mention of the path.
   mkdir -p "$REPO/.agent-requests"
-  echo "backed by docs/proofs/2026-09-25-status.md" > "$REPO/.agent-requests/001-status.result.md"
+  printf -- '- Status: ran\n- Exit code: 0\n\nProof written: docs/proofs/2026-09-25-status.md\n' \
+    > "$REPO/.agent-requests/001-status.result.md"
 
   verify
   [ "$(status_json '[.reasons[] | select(.check=="proofs-unbacked")] | length')" -eq 0 ]
+}
+
+# --- Final review fix wave A: I2 (proof backing must be exact, and scoped) ---
+
+@test "I2: an agent-shaped result with a bare mention of the path does not back a proof" {
+  echo "Expected output (example)" > "$REPO/docs/proofs/2026-09-25-mention.md"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "fake proof"
+
+  mkdir -p "$REPO/.agent-requests"
+  echo "backed by docs/proofs/2026-09-25-mention.md" > "$REPO/.agent-requests/001-mention.result.md"
+
+  verify
+  [ "$(status_json '[.reasons[] | select(.check=="proofs-unbacked")] | length')" -eq 1 ]
+}
+
+@test "I2: a declined result does not back a proof, even if it mentions the path" {
+  echo "Expected output (example)" > "$REPO/docs/proofs/2026-09-25-declined.md"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "fake proof"
+
+  mkdir -p "$REPO/.agent-requests"
+  printf -- '- Status: declined\n- Reason: refused: too risky\n\nProof written: docs/proofs/2026-09-25-declined.md\n' \
+    > "$REPO/.agent-requests/001-declined.result.md"
+
+  verify
+  [ "$(status_json '[.reasons[] | select(.check=="proofs-unbacked")] | length')" -eq 1 ]
+}
+
+@test "I2: a proof committed and pushed earlier on the branch is not judged" {
+  local remote="$BATS_TEST_TMPDIR/remote.git"
+  git init -q --bare -b main "$remote"
+  git -C "$REPO" remote add origin "$remote"
+  git -C "$REPO" push -q -u origin agent/x
+
+  echo "Expected output (example)" > "$REPO/docs/proofs/2026-09-25-pushed.md"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "pushed proof, no backing result"
+  git -C "$REPO" push -q origin agent/x
+
+  # An unrelated dirty change, so the worktree has something else to judge.
+  echo "# note" >> "$REPO/scripts/hello.sh"
+
+  verify
+  [ "$(status_json '[.reasons[] | select(.check=="proofs-unbacked")] | length')" -eq 0 ]
+}
+
+@test "I2: an unpushed agent commit adding a proof is judged" {
+  local remote="$BATS_TEST_TMPDIR/remote.git"
+  git init -q --bare -b main "$remote"
+  git -C "$REPO" remote add origin "$remote"
+  git -C "$REPO" push -q -u origin agent/x
+
+  echo "Expected output (example)" > "$REPO/docs/proofs/2026-09-25-unpushed.md"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "unpushed proof, no backing result"
+
+  verify
+  [ "$(status_json '[.reasons[] | select(.check=="proofs-unbacked")] | length')" -eq 1 ]
+  msg=$(status_json '.reasons[] | select(.check=="proofs-unbacked") | .message')
+  [[ "$msg" == *"docs/proofs/2026-09-25-unpushed.md"* ]] || return 1
 }
 
 @test "replay Task 20: zero-byte and whitespace-only files block, .gitkeep is spared" {

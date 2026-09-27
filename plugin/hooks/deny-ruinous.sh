@@ -98,6 +98,13 @@ is_firewall_path() {
   return 1
 }
 
+# Rule broker-result: results are written only by the broker on the Mac (I2) -- the agent may
+# still create request files (".agent-requests/NNN-slug.md"), just not their .result.md. Matched
+# by path component like the checks above, so ".agent-requests-archive/" is never caught.
+is_agent_request_result_path() {
+  [[ "$1" =~ (^|/)\.agent-requests/[^/]*\.result\.md$ ]]
+}
+
 # Lexically normalizes a path -- collapses repeated slashes and drops "." and ".." components --
 # without touching the filesystem, so a path that doesn't exist yet, or is itself a symlink,
 # normalizes exactly the same way (M3: `/workspace/docs//proofs/x.md` and `docs/./proofs/x.md`
@@ -143,6 +150,9 @@ check_one_write_target() {
   fi
   if is_dot_agent_path "$target"; then
     deny verifier-output "the verifier's own verdict is not yours to edit; fix the reasons and let it re-run"
+  fi
+  if is_agent_request_result_path "$target"; then
+    deny broker-result "results are written only by the broker on the Mac; file a .agent-requests/ request instead"
   fi
   if is_firewall_path "$target"; then
     deny firewall "the egress firewall is the boundary between this container and the internet; ask the human, or file a .agent-requests/ request"
@@ -610,6 +620,8 @@ check_write_path() {
     "proof files are written only from real command output; file a .agent-requests/ request instead"
   is_dot_agent_path "$p" && deny verifier-output \
     "the verifier's own verdict is not yours to edit; fix the reasons and let it re-run"
+  is_agent_request_result_path "$p" && deny broker-result \
+    "results are written only by the broker on the Mac; file a .agent-requests/ request instead"
   return 0
 }
 

@@ -366,3 +366,30 @@ assert_allow() {
   run_hook_with "$(bash_payload "cp -r .agent/STATUS.json /tmp/copy.json")"
   assert_deny verifier-output
 }
+
+# --- Final review fix wave A: I2 (a .result.md file is the broker's alone to write) ---
+
+@test "I2: a Write/Edit to a .agent-requests/*.result.md is denied; the request file itself is allowed" {
+  run_hook_with "$(write_payload Write ".agent-requests/001-x.result.md")"
+  assert_deny broker-result
+
+  run_hook_with "$(write_payload Edit ".agent-requests/001-x.result.md")"
+  assert_deny broker-result
+
+  run_hook_with "$(write_payload Write ".agent-requests/001-x.md")"
+  assert_allow
+}
+
+@test "I2: a Bash redirect, tee, cp, or mv into a .result.md target is denied" {
+  run_hook_with "$(bash_payload "echo x > .agent-requests/001-x.result.md")"
+  assert_deny broker-result
+
+  run_hook_with "$(bash_payload "tee .agent-requests/001-x.result.md")"
+  assert_deny broker-result
+
+  run_hook_with "$(bash_payload "cp /tmp/a .agent-requests/001-x.result.md")"
+  assert_deny broker-result
+
+  run_hook_with "$(bash_payload "mv /tmp/a .agent-requests/001-x.result.md")"
+  assert_deny broker-result
+}
