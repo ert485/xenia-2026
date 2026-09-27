@@ -23,6 +23,7 @@ PY
 # plugin_allow <owner/repo> [file]: the SessionStart hook reads that repo's own PRINCIPLES.md.
 plugin_allow() {
   local f="${2:-$KIT_ROOT/plugin/allowed-repos.txt}"
+  # ok-to-hide: idempotent add; grep fails when the line is absent, or when $f doesn't exist yet.
   grep -qxF -- "$1" "$f" 2>/dev/null || printf '%s\n' "$1" >> "$f"
 }
 

@@ -30,15 +30,16 @@ deny() {
 # jq missing: fail closed only for what can still be told apart without it (a raw grep on the
 # payload text), per the plugin's hook contract. Everything else is allowed rather than guessed at.
 if ! command -v jq >/dev/null 2>&1; then
+  # ok-to-hide: jq-absent probe of the raw payload; a grep error just means not ours
   if grep -q '"tool_name"[[:space:]]*:[[:space:]]*"Bash"' <<<"$payload" 2>/dev/null \
-     || grep -q '"tool_name"[[:space:]]*:[[:space:]]*"Write"' <<<"$payload" 2>/dev/null; then
+     || grep -q '"tool_name"[[:space:]]*:[[:space:]]*"Write"' <<<"$payload" 2>/dev/null; then  # ok-to-hide: jq-absent probe of the raw payload; a grep error just means not ours
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"deny-ruinous: jq missing, cannot inspect the call"}}\n'
   fi
   exit 0
 fi
 
-tool_name="$(jq -r '.tool_name // empty' <<<"$payload" 2>/dev/null)" || tool_name=""
-cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)" || cwd=""
+tool_name="$(jq -r '.tool_name // empty' <<<"$payload" 2>/dev/null)" || tool_name=""  # ok-to-hide: a malformed payload is not ours to judge; the hook allows it (tested)
+cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)" || cwd=""  # ok-to-hide: a malformed payload is not ours to judge; the hook allows it (tested)
 
 # ---------------------------------------------------------------------------
 # Shell tokenizer: python3's shlex, posix mode, with an unquoted newline treated as its own
@@ -64,7 +65,7 @@ tokenize_bash_command() {
   command -v python3 >/dev/null 2>&1 || return 2
   local tmp rc tok
   tmp="$(mktemp)" || return 2
-  python3 -c "$TOKENIZE_PY" "$1" > "$tmp" 2>/dev/null
+  python3 -c "$TOKENIZE_PY" "$1" > "$tmp" 2>/dev/null  # ok-to-hide: the exit status is checked below; only the message is dropped
   rc=$?
   if [ "$rc" -ne 0 ]; then rm -f "$tmp"; return 1; fi
   while IFS= read -r -d '' tok; do
@@ -98,15 +99,61 @@ is_firewall_path() {
   return 1
 }
 
+# Rule broker-result: results are written only by the broker on the Mac (I2) -- the agent may
+# still create request files (".agent-requests/NNN-slug.md"), just not their .result.md. Matched
+# by path component like the checks above, so ".agent-requests-archive/" is never caught.
+is_agent_request_result_path() {
+  [[ "$1" =~ (^|/)\.agent-requests/[^/]*\.result\.md$ ]]
+}
+
+# Lexically normalizes a path -- collapses repeated slashes and drops "." and ".." components --
+# without touching the filesystem, so a path that doesn't exist yet, or is itself a symlink,
+# normalizes exactly the same way (M3: `/workspace/docs//proofs/x.md` and `docs/./proofs/x.md`
+# must be caught the same as their plain forms). A leading "/" is preserved; ".." past a leading
+# "/" is dropped rather than going negative.
+normalize_path() {
+  local p="$1"
+  awk -v p="$p" '
+    BEGIN {
+      leading = (substr(p, 1, 1) == "/") ? "/" : ""
+      n = split(p, parts, "/")
+      out_n = 0
+      for (i = 1; i <= n; i++) {
+        part = parts[i]
+        if (part == "" || part == ".") continue
+        if (part == "..") {
+          if (out_n > 0 && out[out_n] != "..") {
+            out_n--
+          } else if (leading != "/") {
+            out_n++; out[out_n] = ".."
+          }
+          continue
+        }
+        out_n++; out[out_n] = part
+      }
+      result = leading
+      for (i = 1; i <= out_n; i++) {
+        result = result out[i] (i < out_n ? "/" : "")
+      }
+      if (result == "") result = "."
+      print result
+    }
+  '
+}
+
 # One candidate write target (a redirection target, or a resolved destination argument): denies
 # under whichever rule it matches, or returns 0 (not a match) so the caller keeps looking.
 check_one_write_target() {
-  local target="$1"
+  local target
+  target="$(normalize_path "$1")"
   if is_docs_proofs_path "$target"; then
     deny proofs "proof files are written only from real command output; file a .agent-requests/ request instead"
   fi
   if is_dot_agent_path "$target"; then
     deny verifier-output "the verifier's own verdict is not yours to edit; fix the reasons and let it re-run"
+  fi
+  if is_agent_request_result_path "$target"; then
+    deny broker-result "results are written only by the broker on the Mac; file a .agent-requests/ request instead"
   fi
   if is_firewall_path "$target"; then
     deny firewall "the egress firewall is the boundary between this container and the internet; ask the human, or file a .agent-requests/ request"
@@ -137,7 +184,7 @@ is_dangerous_rm_target() {
   esac
   if [[ -n "$cwd" ]]; then
     [[ "$target" == "$cwd" ]] && return 0
-    worktree="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
+    worktree="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"  # ok-to-hide: a cwd outside a repository has no worktree; handled as empty below
     [[ -n "$worktree" && "$target" == "$worktree" ]] && return 0
   fi
   return 1
@@ -161,6 +208,8 @@ check_force_push_args() {
       --mirror) deny force-push \
         "a mirror push can overwrite or delete remote refs wholesale; push a normal commit, or file a .agent-requests/ request" ;;
       --delete) deny force-push \
+        "deleting a remote ref is not allowed from here; ask the human, or file a .agent-requests/ request" ;;
+      -d) deny force-push \
         "deleting a remote ref is not allowed from here; ask the human, or file a .agent-requests/ request" ;;
       -f|-fu|-uf) deny force-push \
         "a force push rewrites shared history; push a normal commit, or file a .agent-requests/ request if history really needs rewriting" ;;
@@ -223,11 +272,13 @@ check_rm_recursive_args() {
 }
 
 # Rule firewall (iptables/ip6tables/ipset half): a flush/policy/delete verb as its own argument.
+# Long forms are caught everywhere their short form is: -F/--flush, -X/--delete-chain,
+# -P/--policy, -D/--delete (M3).
 check_iptables_args() {
   local t
   for t in "$@"; do
     case "$t" in
-      -F|-X|-P|-D|flush|destroy)
+      -F|--flush|-X|--delete-chain|-P|--policy|-D|--delete|flush|destroy)
         deny firewall \
           "the egress firewall is the boundary between this container and the internet; ask the human, or file a .agent-requests/ request"
         ;;
@@ -275,6 +326,38 @@ check_write_targets_last() {
   return 0
 }
 
+# Rule verifier-output (mv/cp/git-mv source half, M3): a SOURCE argument under .agent/ is denied
+# too, not only the destination -- `mv .agent elsewhere` must be caught the same as
+# `mv elsewhere .agent`. Every non-option argument is a source except the one destination
+# (determined the same way check_write_targets_last determines it: the -t/--target-directory
+# argument if given, else the last non-option argument).
+check_sources_not_dot_agent() {
+  local -a nonflag=()
+  local t skip_next=0 dash_t_dir=""
+  for t in "$@"; do
+    if [ "$skip_next" -eq 1 ]; then
+      dash_t_dir="$t"
+      skip_next=0
+      continue
+    fi
+    case "$t" in
+      -t) skip_next=1; continue ;;
+      --target-directory=*) dash_t_dir="${t#--target-directory=}"; continue ;;
+      -*) continue ;;
+    esac
+    nonflag+=("$t")
+  done
+  local cnt="${#nonflag[@]}" last_idx=-1 i
+  [ -z "$dash_t_dir" ] && [ "$cnt" -gt 0 ] && last_idx=$((cnt - 1))
+  for ((i = 0; i < cnt; i++)); do
+    [ "$i" -eq "$last_idx" ] && continue
+    if is_dot_agent_path "$(normalize_path "${nonflag[$i]}")"; then
+      deny verifier-output "the verifier's own verdict is not yours to edit; fix the reasons and let it re-run"
+    fi
+  done
+  return 0
+}
+
 # sed/perl only write in place with -i (or -i<suffix>); otherwise they only read.
 check_inplace_edit_args() {
   local t has_i=0
@@ -313,7 +396,7 @@ check_git_subcommand() {
     push) check_force_push_args "${sargs[@]}" ;;
     clean) check_git_clean_args "${sargs[@]}" ;;
     rm) check_write_targets_all "${sargs[@]}" ;;
-    mv) check_write_targets_last "${sargs[@]}" ;;
+    mv) check_write_targets_last "${sargs[@]}"; check_sources_not_dot_agent "${sargs[@]}" ;;
   esac
   return 0
 }
@@ -473,22 +556,38 @@ process_simple_command() {
   case "$REAL_BASE" in
     rm) check_rm_recursive_args "$cwd" "${ARGS[@]}"; check_write_targets_all "${ARGS[@]}" ;;
     tee|touch|truncate|chmod) check_write_targets_all "${ARGS[@]}" ;;
-    cp|mv|install|ln) check_write_targets_last "${ARGS[@]}" ;;
+    cp|mv) check_write_targets_last "${ARGS[@]}"; check_sources_not_dot_agent "${ARGS[@]}" ;;
+    install|ln) check_write_targets_last "${ARGS[@]}" ;;
     sed|perl) check_inplace_edit_args "${ARGS[@]}" ;;
     iptables|ip6tables|ipset) check_iptables_args "${ARGS[@]}" ;;
   esac
   return 0
 }
 
+# I1: shlex's punctuation_chars mode merges a run of consecutive punctuation characters into one
+# token, so "&&" right before a newline becomes the single token "&&\n" (same for a trailing ";",
+# "|", or ")", and a blank line becomes "\n\n"). The exact-match list above missed every one of
+# these, treating the merged token as an ordinary word and joining the next line onto the previous
+# simple command -- so its real verb was never checked. A token made of nothing but operator
+# characters (and/or newlines) is still just an operator boundary: nothing downstream cares which
+# operator it was, only whether it ends the current simple command.
 is_operator_token() {
-  case "$1" in
-    ';'|'&&'|'||'|'|'|'&'|'('|')'|$'\n') return 0 ;;
-  esac
+  local t="$1" stripped="$1" c
+  [ -n "$t" ] || return 1
+  for c in ';' '&' '|' '(' ')' $'\n'; do
+    stripped="${stripped//$c/}"
+  done
+  [ -z "$stripped" ] && return 0
   return 1
 }
 
 check_bash() {
   local cmd="$1" cwd="$2" rc
+  # I1: a backslash immediately followed by a newline is real-shell line continuation -- it joins
+  # two physical lines into one logical line. Replaced with a single space (what a real shell
+  # effectively does) before tokenizing, so `rm -rf \` + newline + `/workspace` can't split rm from
+  # its own target by hiding the target on a "separate" line.
+  cmd="${cmd//\\$'\n'/ }"
   tokenize_bash_command "$cmd"
   rc=$?
   if [ "$rc" -eq 2 ]; then
@@ -514,29 +613,32 @@ check_bash() {
 }
 
 check_write_path() {
-  local p="$1"
+  local p
+  p="$(normalize_path "$1")"
   is_firewall_path "$p" && deny firewall \
     "the egress firewall is the boundary between this container and the internet; ask the human, or file a .agent-requests/ request"
   is_docs_proofs_path "$p" && deny proofs \
     "proof files are written only from real command output; file a .agent-requests/ request instead"
   is_dot_agent_path "$p" && deny verifier-output \
     "the verifier's own verdict is not yours to edit; fix the reasons and let it re-run"
+  is_agent_request_result_path "$p" && deny broker-result \
+    "results are written only by the broker on the Mac; file a .agent-requests/ request instead"
   return 0
 }
 
 case "$tool_name" in
   Bash)
-    command_str="$(jq -r '.tool_input.command // empty' <<<"$payload" 2>/dev/null)" || command_str=""
+    command_str="$(jq -r '.tool_input.command // empty' <<<"$payload" 2>/dev/null)" || command_str=""  # ok-to-hide: a malformed payload is not ours to judge; the hook allows it (tested)
     [[ -n "$command_str" ]] || exit 0
     check_bash "$command_str" "$cwd"
     ;;
   Write|Edit|MultiEdit)
-    file_path="$(jq -r '.tool_input.file_path // empty' <<<"$payload" 2>/dev/null)" || file_path=""
+    file_path="$(jq -r '.tool_input.file_path // empty' <<<"$payload" 2>/dev/null)" || file_path=""  # ok-to-hide: a malformed payload is not ours to judge; the hook allows it (tested)
     [[ -n "$file_path" ]] || exit 0
     check_write_path "$file_path"
     ;;
   NotebookEdit)
-    notebook_path="$(jq -r '.tool_input.notebook_path // empty' <<<"$payload" 2>/dev/null)" || notebook_path=""
+    notebook_path="$(jq -r '.tool_input.notebook_path // empty' <<<"$payload" 2>/dev/null)" || notebook_path=""  # ok-to-hide: a malformed payload is not ours to judge; the hook allows it (tested)
     [[ -n "$notebook_path" ]] || exit 0
     check_write_path "$notebook_path"
     ;;

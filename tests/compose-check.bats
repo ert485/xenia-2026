@@ -144,3 +144,93 @@ compose() {
   run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
   [ "$status" -eq 0 ]
 }
+
+# --- Rendered-JSON form (C2, spec section 9, D36): docker compose config --format json resolves
+# ${VAR:-default} interpolation, a committed .env file, anchors and extends before the checker ever
+# sees the file. These fixtures are written as the RENDERED form (real JSON booleans, canonical
+# long-syntax volumes with resolved absolute paths) instead of the raw YAML the checker used to be
+# fed, since compose-check.py accepts either (JSON is valid YAML).
+
+@test "a rendered privileged:true (resolved from \${X:-true} interpolation) is refused" {
+  printf '{"services":{"web":{"build":".","privileged":true}}}' > "$PROJ/compose.yml"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"service web: privileged: true"* ]]
+}
+
+@test "a rendered cap_add SYS_ADMIN (resolved from interpolation) is refused" {
+  printf '{"services":{"web":{"build":".","cap_add":["SYS_ADMIN"]}}}' > "$PROJ/compose.yml"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"service web: cap_add SYS_ADMIN"* ]]
+}
+
+@test "device_cgroup_rules is refused" {
+  printf '{"services":{"web":{"build":".","device_cgroup_rules":["b 259:* rwm"]}}}' > "$PROJ/compose.yml"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"service web: device_cgroup_rules is not allowed"* ]]
+}
+
+@test "sysctls is refused" {
+  printf '{"services":{"web":{"build":".","sysctls":{"net.ipv4.ip_forward":"1"}}}}' > "$PROJ/compose.yml"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"service web: sysctls is not allowed"* ]]
+}
+
+@test "cgroup_parent is refused" {
+  printf '{"services":{"web":{"build":".","cgroup_parent":"/"}}}' > "$PROJ/compose.yml"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"service web: cgroup_parent is not allowed"* ]]
+}
+
+@test "a non-web service claiming container_name app-web is refused" {
+  printf '{"services":{"web":{"build":"."},"sidecar":{"image":"alpine","container_name":"app-web"}}}' > "$PROJ/compose.yml"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"service sidecar: container_name is not allowed on a non-web service"* ]]
+}
+
+@test "the web service's own container_name is still allowed" {
+  printf '{"services":{"web":{"build":".","container_name":"app-web"}}}' > "$PROJ/compose.yml"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 0 ]
+}
+
+@test "a non-web service aliasing itself on the edge network is refused" {
+  printf '{"services":{"web":{"build":".","networks":{"edge":{}}},"sidecar":{"image":"alpine","networks":{"edge":{"aliases":["app-web"]}}}},"networks":{"edge":{"external":true}}}' > "$PROJ/compose.yml"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"service sidecar: sets aliases on the edge network"* ]]
+}
+
+@test "a rendered absolute bind path inside the project directory is accepted" {
+  printf '{"services":{"web":{"build":".","volumes":[{"type":"bind","source":"%s/data","target":"/data"}]}}}' "$PROJ" > "$PROJ/compose.yml"
+  mkdir -p "$PROJ/data"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 0 ]
+}
+
+@test "kriket-like rendered compose (web/frontend/backend/db, required BETTER_AUTH_SECRET resolved) is accepted" {
+  printf '%s' '{
+    "name": "app",
+    "services": {
+      "web": {"image": "ghcr.io/example/kriket-web:sha-fake"},
+      "frontend": {"image": "ghcr.io/example/kriket-web-frontend:sha-fake"},
+      "backend": {
+        "image": "ghcr.io/example/kriket-web-backend:sha-fake",
+        "environment": {"BETTER_AUTH_SECRET": "fake-test-secret-do-not-use"},
+        "depends_on": {"db": {"condition": "service_healthy"}}
+      },
+      "db": {
+        "image": "postgres:16",
+        "volumes": [{"type": "volume", "source": "pgdata", "target": "/var/lib/postgresql/data"}]
+      }
+    },
+    "volumes": {"pgdata": {}}
+  }' > "$PROJ/compose.yml"
+  run "$PY" "$CHECK" "$PROJ/compose.yml" "$PROJ"
+  [ "$status" -eq 0 ]
+}

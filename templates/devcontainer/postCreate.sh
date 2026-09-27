@@ -61,6 +61,7 @@ fi
 # The Dockerfile also writes /opt/xenia/plugins/.claude-plugin/marketplace.json for exactly this.
 # Never fails postCreate.sh itself; documented in plugin/README.md.
 if command -v claude >/dev/null 2>&1; then
+  # ok-to-hide: optional install-state probe; a failure just means "not installed", handled below.
   if claude plugin list 2>/dev/null | grep -q xenia-kit; then
     :
   elif claude plugin marketplace add /opt/xenia/plugins >/dev/null 2>&1 \

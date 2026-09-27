@@ -19,7 +19,7 @@ for arg in "$@"; do
 done
 
 tf() { "$KIT_ROOT/scripts/tf.sh" "$@"; }
-ask() { local ans=""; read -r -p "$1 [type yes]: " ans || true; [[ "$ans" == "yes" ]]; }
+ask() { local ans=""; read -r -p "$1 [type yes]: " ans || true; [[ "$ans" == "yes" ]]; }  # ok-to-hide: a failed read leaves ans empty, which declines (the safe default)
 
 log "== shutdown first"
 "$KIT_ROOT/scripts/shutdown.sh" || log "warning: some shutdown entries failed; the destroys below still run"
@@ -29,7 +29,7 @@ if ask "Destroy recipes/gpu-box?"; then tf recipes/gpu-box destroy; else log "ke
 
 log "== examples/kit-site: the public kit site at the apex"
 if ask "Destroy examples/kit-site?"; then
-  bucket="$(TF_NO_MASK=1 tf examples/kit-site output -raw bucket 2>/dev/null || true)"
+  bucket="$(TF_NO_MASK=1 tf examples/kit-site output -raw bucket 2>/dev/null || true)"  # ok-to-hide: no bucket output means the stack was never applied; guarded below
   if [[ -n "$bucket" ]]; then aws s3 rm "s3://$bucket" --recursive --profile cohack --only-show-errors; fi
   tf examples/kit-site destroy
 else
@@ -39,6 +39,22 @@ fi
 log "== recipes/docker-box: the gateway (its Postgres holds keys and spend history), the demo app, previews"
 log "   the hourly backups stay in the backup bucket"
 if ask "Destroy recipes/docker-box?"; then tf recipes/docker-box destroy; else log "kept recipes/docker-box"; fi
+
+log "== examples/dynamodb-demo: the Should-tier demo DynamoDB table (M13 of the final review)"
+# An uninitialized or never-applied stack has no state: that's "nothing to destroy", not an error.
+# ok-to-hide: no state means nothing to destroy
+demo_state="$(tf examples/dynamodb-demo state list 2>/dev/null || true)"
+if [[ -n "$demo_state" ]]; then
+  if ask "Destroy examples/dynamodb-demo?"; then
+    log "deletion protection is on by default: if this fails, set deletion_protection = false in"
+    log "infra/examples/dynamodb-demo/main.tf (or its module call), apply, then destroy again"
+    tf examples/dynamodb-demo destroy
+  else
+    log "kept examples/dynamodb-demo"
+  fi
+else
+  log "examples/dynamodb-demo: no state, nothing to destroy"
+fi
 
 if [[ "$all" == 1 ]]; then
   log "== platform: zone, certificate, OIDC roles, ECR, parameters"

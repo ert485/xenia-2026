@@ -43,7 +43,7 @@ for c in compose.yml compose.yaml docker-compose.yml docker-compose.yaml; do
 done
 [[ -n "$compose" ]] || die "no compose.yml or docker-compose.yml in '$appdir' (see templates/team-repo/compose.example.yml)"
 check_compose_contract "$compose"
-check_preview_isolation "$compose" "$app"
+check_preview_isolation "$project" "$app" "$compose"
 printf '%s\n' "$compose" > "$dir/compose-file"
 
 cap="$(preview_cap_for "$project")"

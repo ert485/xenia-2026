@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Usage (on the Docker box, through the xenia-restore document): box/restore.sh <s3-key> <container>
+# Replays a pg_dumpall backup written by box/backup.sh into a running Postgres container:
+#   1. uploads a pre-restore dump of the container next to its backups, so the restore can be undone;
+#   2. drops, with FORCE, every database the dump creates: backup.sh dumps without --clean, so without this
+#      the replay would fail on existing tables and duplicate keys;
+#   3. replays the dump with psql as the container's POSTGRES_USER. "already exists" errors (roles) are
+#      expected; any other error fails the run and is printed.
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib.sh
+source "$here/lib.sh"
+env_file="${XENIA_ENV_FILE:-/etc/xenia.env}"
+# shellcheck disable=SC1090
+[[ -f "$env_file" ]] && source "$env_file"
+: "${BACKUP_BUCKET:?BACKUP_BUCKET missing from $env_file}"
+
+key="${1:?usage: restore.sh <s3-key> <container>}"
+c="${2:?usage: restore.sh <s3-key> <container>}"
+[[ "$key" =~ ^[A-Za-z0-9._/-]+\.sql\.gz$ && "$key" != *..* ]] || die "not a backup key: $key"
+# docker's own message tells "no such object" apart from a broken daemon; show it rather than guess.
+image="$(docker inspect -f '{{.Config.Image}}' "$c" 2>&1)" || die "no such container, or docker failed: $c: $image"
+[[ "$image" == postgres* ]] || die "$c runs $image, not postgres"
+user="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" | sed -n 's/^POSTGRES_USER=//p' | head -1)"
+user="${user:-postgres}"
+
+work="$(mktemp -d "${TMPDIR:-/var/tmp}/xenia-restore.XXXXXX")"
+trap 'rm -rf "$work"' EXIT
+
+pre="$(hostname)/$c/pre-restore-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+docker exec "$c" pg_dumpall -U "$user" | gzip | aws s3 cp - "s3://$BACKUP_BUCKET/$pre" --only-show-errors
+log "saved the current state as $pre (restore that key to undo this)"
+
+aws s3 cp "s3://$BACKUP_BUCKET/$key" "$work/dump.sql.gz" --only-show-errors
+gunzip "$work/dump.sql.gz"
+dbs=()
+while IFS= read -r db; do dbs+=("$db"); done < <(
+  sed -nE 's/^CREATE DATABASE "?([A-Za-z0-9_]+)"?( .*)?;$/\1/p' "$work/dump.sql" | grep -vxE 'postgres|template0|template1' || true)  # ok-to-hide: no match means the dump has no extra databases
+for db in "${dbs[@]}"; do
+  log "dropping database $db"
+  docker exec "$c" psql -q -U "$user" -d postgres -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE);"
+done
+
+# psql_rc: M7 of the final review. Without ON_ERROR_STOP, psql normally continues past a SQL error
+# in the script and exits 0 at the end even though a statement failed -- that's why the check below
+# is grep-based, not exit-code-based. But 2 (and above) means psql itself failed hard (couldn't
+# connect, or the docker exec that ran it failed): the log-file grep can miss that entirely (a
+# connection failure's message starts "psql: error:", not "ERROR"), and used to fall straight
+# through to "restored" below.
+psql_rc=0
+docker exec -i "$c" psql -q -U "$user" -d postgres < "$work/dump.sql" > "$work/psql.log" 2>&1 || psql_rc=$?
+if [[ "$psql_rc" -ge 2 ]]; then
+  tail -20 "$work/psql.log" >&2
+  die "psql exited $psql_rc (connection or fatal error); the pre-restore state is $pre"
+fi
+unexpected="$(grep 'ERROR' "$work/psql.log" | grep -v 'already exists' || true)"  # ok-to-hide: no match means no unexpected error; checked just below
+if [[ -n "$unexpected" ]]; then
+  printf '%s\n' "$unexpected" | head -20 >&2
+  die "the replay reported errors; the pre-restore state is $pre"
+fi
+log "restored $key into $c (${#dbs[@]} databases recreated)"

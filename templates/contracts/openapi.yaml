@@ -1,0 +1,75 @@
+# Agent: this file is the source of truth for the API (P-contracts). Change the spec first, run
+# `make types`, then change the code so it compiles against the regenerated types. contract-check.yml
+# lints this file, fails the PR if src/contracts/ is stale, and fails on breaking changes unless the
+# PR carries the breaking-ok label.
+openapi: 3.1.0
+info:
+  title: Team API
+  version: 0.1.0
+  description: Starter contract from the Co.Hack 2026 kit. Replace the example paths with the product's own.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: https://app.26.cohack.tetl.ca
+    description: The demo deployment (main)
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness probe used by the deploy workflow's smoke test
+      responses:
+        "200":
+          description: The app is up
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: ok
+  /items/{id}:
+    get:
+      operationId: getItem
+      summary: Fetch one item by its id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The item's id
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: The item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Item"
+        "404":
+          description: No item has that id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  schemas:
+    Item:
+      type: object
+      additionalProperties: false
+      required: [id, name, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: A short, human-readable reason

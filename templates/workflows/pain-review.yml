@@ -1,0 +1,57 @@
+# pain-review (Should tier; shipped as a template, not proven end to end unless
+# docs/proofs/2026-09-25-pain-review.md exists in the kit). Manual by default; uncomment the schedule to
+# run it every four hours during the event. Advisory: it rewrites the pinned "Rule feedback" issue, opens
+# one next-fix issue, and posts one recommendation. It never blocks anything.
+name: pain-review
+on:
+  workflow_dispatch:
+    inputs:
+      post:
+        description: Post the recommendation to the team channel
+        type: boolean
+        default: true
+  # Cron runs in UTC. Saskatchewan is CST (UTC-6) all year, so 15:00 UTC is 09:00 CST.
+  # schedule:
+  #   - cron: '0 */4 * * *'
+permissions: {}
+concurrency:
+  group: pain-review
+  cancel-in-progress: false
+jobs:
+  pain-review:
+    name: pain-review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: fetch the kit's scripts (set the KIT_REF variable to a commit SHA to pin them)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ert485/xenia-2026
+          ref: ${{ vars.KIT_REF || 'main' }}
+          path: kit
+          persist-credentials: false
+      - name: install Claude Code
+        run: npm i -g @anthropic-ai/claude-code@2.1.280
+      - name: pain review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_BASE_URL: https://llm.26.cohack.tetl.ca
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.GATEWAY_CI_KEY }}
+          ANTHROPIC_MODEL: qwen3-coder
+          ANTHROPIC_DEFAULT_OPUS_MODEL: qwen3-coder
+          ANTHROPIC_DEFAULT_SONNET_MODEL: qwen3-coder
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: qwen3-coder
+          ANTHROPIC_DEFAULT_FABLE_MODEL: qwen3-coder
+          CLAUDE_CODE_MAX_CONTEXT_TOKENS: "110000"
+          CLAUDE_CODE_MAX_OUTPUT_TOKENS: "16000"
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          POST: ${{ github.event_name == 'schedule' || inputs.post }}
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY")
+          if [ "$POST" = "true" ] && [ -n "$DISCORD_WEBHOOK_URL" ]; then args+=(--post); fi
+          kit/scripts/pain-review.sh "${args[@]}"

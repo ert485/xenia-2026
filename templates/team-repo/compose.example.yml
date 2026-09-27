@@ -2,6 +2,8 @@
 #   - the service the world sees is named web and listens on APP_PORT (default 3000)
 #   - image: ${IMAGE:-...} so the deploy can run the image CI built; build: . for local and previews
 #   - no ports: the kit's override attaches web to Caddy's network and drops host ports
+# After a deploy, the box needs GET / on the app's public URL to answer 2xx or 3xx within
+# HEALTH_TIMEOUT (90 seconds by default) -- otherwise it reverts to the image that was running before.
 # The database password below is a local default: db is reachable only inside this compose project.
 services:
   web:

@@ -75,6 +75,10 @@ data "aws_iam_policy_document" "box" {
       "arn:aws:ssm:ca-central-1:${local.acct}:parameter/xenia/gateway/*",
       "arn:aws:ssm:ca-central-1:${local.acct}:parameter/xenia/gpu/*",
       "arn:aws:ssm:ca-central-1:${local.acct}:parameter/xenia/app/*",
+      # GetParametersByPath is authorised against the path itself, not its children: without this
+      # entry the box can read /xenia/app/<NAME> one by one but cannot list them (verified on the
+      # box, 2026-09-26), and deploy.sh lists them to hand a team's secrets to compose.
+      "arn:aws:ssm:ca-central-1:${local.acct}:parameter/xenia/app",
     ]
   }
   statement {

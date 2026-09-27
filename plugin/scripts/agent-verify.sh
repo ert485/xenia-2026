@@ -313,24 +313,69 @@ check_make() {
 }
 
 # Check proofs-unbacked: blocks a changed docs/proofs/ file unless some .agent-requests/*.result.md
-# in the worktree names that path. Incident: on 2026-09-25 a proof was committed, written before
-# any command behind it had run.
+# in the worktree shows the broker itself ran the command that produced it. Incident: on
+# 2026-09-25 a proof was committed, written before any command behind it had run.
+#
+# I2: a bare `grep -qF <path>` matched ANY mention of the path anywhere in any result file --
+# including a result the agent wrote itself by an unlisted route, or a declined/failed request
+# whose command text merely names the path. Backing now requires the broker's own three lines,
+# exactly as write_result/write_proof in scripts/agent-requests.sh produce them for a command that
+# really ran to completion: an exact "- Status: ran" line, an exact "- Exit code: 0" line, and an
+# exact "Proof written: <path>" line.
 proof_is_backed() {
   local path="$1" rf
   if [ -d "$worktree_root/.agent-requests" ]; then
     for rf in "$worktree_root"/.agent-requests/*.result.md; do
       [ -e "$rf" ] || continue
-      grep -qF -- "$path" "$rf" >/dev/null 2>&1 && return 0
+      grep -qxF -- '- Status: ran' "$rf" || continue
+      grep -qxF -- '- Exit code: 0' "$rf" || continue
+      grep -qxF -- "Proof written: $path" "$rf" && return 0
     done
   fi
   return 1
 }
 
+# I2 (scope): a proof a human already committed AND pushed earlier on the branch must never block
+# a fresh container's Stop hook -- CI already downgrades this exact case to a warning, but the Stop
+# hook didn't. Every other check still judges the whole base..worktree diff; proofs-unbacked alone
+# narrows to: the worktree's own uncommitted/untracked changes, plus whatever HEAD has added since
+# the branch's upstream (`@{u}`), when an upstream exists. With no upstream there's nothing to
+# exempt, so this falls back to the same base..worktree scope every other check uses.
+proof_scope_files() {
+  if ! git rev-parse --verify --quiet '@{u}' >/dev/null 2>&1; then
+    if [ "${#changed_files[@]}" -gt 0 ]; then
+      printf '%s\n' "${changed_files[@]}"
+    fi
+    return 0
+  fi
+
+  local -a uncommitted=()
+  while IFS= read -r f; do
+    [ -n "$f" ] && uncommitted+=("$f")
+  done < <(git diff --name-status --diff-filter=AMR HEAD -- . | awk -F'\t' '{ if ($1 ~ /^R/) print $3; else print $2 }')
+
+  local -a unpushed=()
+  while IFS= read -r f; do
+    [ -n "$f" ] && unpushed+=("$f")
+  done < <(git diff --name-status --diff-filter=AMR '@{u}' HEAD -- . | awk -F'\t' '{ if ($1 ~ /^R/) print $3; else print $2 }')
+
+  {
+    [ "${#uncommitted[@]}" -gt 0 ] && printf '%s\n' "${uncommitted[@]}"
+    [ "${#unpushed[@]}" -gt 0 ] && printf '%s\n' "${unpushed[@]}"
+    [ "${#untracked_files[@]}" -gt 0 ] && printf '%s\n' "${untracked_files[@]}"
+    true
+  } | sort -u
+}
+
 check_proofs_unbacked() {
   is_skipped "proofs-unbacked" && return 0
   local f
-  [ "${#changed_files[@]}" -eq 0 ] && return 0
-  for f in "${changed_files[@]}"; do
+  local -a scope_files=()
+  while IFS= read -r f; do
+    [ -n "$f" ] && scope_files+=("$f")
+  done < <(proof_scope_files)
+  [ "${#scope_files[@]}" -eq 0 ] && return 0
+  for f in "${scope_files[@]}"; do
     case "$f" in
       docs/proofs/*) ;;
       *) continue ;;

@@ -306,3 +306,90 @@ assert_allow() {
   jq -e '.hooks.SessionStart[0].matcher == "startup|resume|clear|compact"' "$KIT/plugin/hooks/hooks.json"
   jq -e '.hooks.SessionStart[0].hooks[0].command | contains("inject-principles.sh")' "$KIT/plugin/hooks/hooks.json"
 }
+
+# --- Final review fix wave A: I1 (multi-line bypasses) + M3 (smaller deny-hook gaps) ---
+
+@test "I1: a trailing && then a newline no longer hides the next line's real command" {
+  run_hook_with "$(bash_payload "$(printf 'make check &&\nrm -rf /workspace')")"
+  assert_deny delete-workspace
+}
+
+@test "I1: a blank line between two commands no longer hides the second" {
+  run_hook_with "$(bash_payload "$(printf 'ls\n\nrm -rf /workspace')")"
+  assert_deny delete-workspace
+}
+
+@test "I1: a trailing pipe then a newline still resolves the piped-to command" {
+  run_hook_with "$(bash_payload "$(printf 'cat x |\ntee docs/proofs/a.md')")"
+  assert_deny proofs
+}
+
+@test "I1: backslash-newline continuation no longer splits rm from its target" {
+  run_hook_with "$(bash_payload "$(printf 'rm -rf \\\\\n  /workspace')")"
+  assert_deny delete-workspace
+}
+
+@test "I1: a harmless multi-line command (trailing && then a new line) is still allowed" {
+  run_hook_with "$(bash_payload "$(printf 'make check &&\necho done')")"
+  assert_allow
+}
+
+@test "M3: git push -d denies a remote-ref delete like --delete does" {
+  run_hook_with "$(bash_payload "git push -d origin some-branch")"
+  assert_deny force-push
+}
+
+@test "M3: iptables long option forms are caught wherever the short forms are" {
+  for cmd in \
+    "sudo iptables --flush" \
+    "sudo iptables --policy OUTPUT ACCEPT" \
+    "sudo iptables --delete OUTPUT 1" \
+    "sudo iptables --delete-chain MYCHAIN"
+  do
+    run_hook_with "$(bash_payload "$cmd")"
+    assert_deny firewall
+  done
+}
+
+@test "M3: a write target is normalized (collapsed // and ./ ) before matching" {
+  run_hook_with "$(bash_payload "echo hi > /workspace/docs//proofs/x.md")"
+  assert_deny proofs
+
+  run_hook_with "$(bash_payload "echo hi > docs/./proofs/x.md")"
+  assert_deny proofs
+}
+
+@test "M3: mv/cp with the SOURCE (not just the destination) under .agent/ is denied" {
+  run_hook_with "$(bash_payload "mv .agent elsewhere")"
+  assert_deny verifier-output
+
+  run_hook_with "$(bash_payload "cp -r .agent/STATUS.json /tmp/copy.json")"
+  assert_deny verifier-output
+}
+
+# --- Final review fix wave A: I2 (a .result.md file is the broker's alone to write) ---
+
+@test "I2: a Write/Edit to a .agent-requests/*.result.md is denied; the request file itself is allowed" {
+  run_hook_with "$(write_payload Write ".agent-requests/001-x.result.md")"
+  assert_deny broker-result
+
+  run_hook_with "$(write_payload Edit ".agent-requests/001-x.result.md")"
+  assert_deny broker-result
+
+  run_hook_with "$(write_payload Write ".agent-requests/001-x.md")"
+  assert_allow
+}
+
+@test "I2: a Bash redirect, tee, cp, or mv into a .result.md target is denied" {
+  run_hook_with "$(bash_payload "echo x > .agent-requests/001-x.result.md")"
+  assert_deny broker-result
+
+  run_hook_with "$(bash_payload "tee .agent-requests/001-x.result.md")"
+  assert_deny broker-result
+
+  run_hook_with "$(bash_payload "cp /tmp/a .agent-requests/001-x.result.md")"
+  assert_deny broker-result
+
+  run_hook_with "$(bash_payload "mv /tmp/a .agent-requests/001-x.result.md")"
+  assert_deny broker-result
+}

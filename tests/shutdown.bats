@@ -73,6 +73,50 @@ entry() {
   [[ "$output" == *"10-bad.sh"*"added-by"* ]]
 }
 
+@test "I6: the real GPU shutdown entry disables both GPU alarms' actions before stopping the instance, not under DRY_RUN" {
+  export FAKE_ALARM_CALLS="$TMP/alarm-calls"; : > "$FAKE_ALARM_CALLS"
+  mkdir -p "$TMP/bin"
+  cat > "$TMP/bin/aws" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_ALARM_CALLS"
+case "$*" in
+  *"ec2 describe-instances"*) echo i-0123456789abcdef0 ;;
+esac
+exit 0
+SH
+  chmod +x "$TMP/bin/aws"
+  PATH="$TMP/bin:$PATH" run shutdown.d/10-gpu-box.sh
+  [ "$status" -eq 0 ]
+  disable_line="$(grep -n 'cloudwatch disable-alarm-actions.*xenia-gpu-box-unhealthy xenia-gpu-box-metrics-missing' "$FAKE_ALARM_CALLS" | cut -d: -f1)"
+  stop_line="$(grep -n 'ec2 stop-instances' "$FAKE_ALARM_CALLS" | cut -d: -f1)"
+  [ -n "$disable_line" ] || return 1
+  [ -n "$stop_line" ] || return 1
+  [ "$disable_line" -lt "$stop_line" ] || return 1
+
+  : > "$FAKE_ALARM_CALLS"
+  DRY_RUN=1 PATH="$TMP/bin:$PATH" run shutdown.d/10-gpu-box.sh
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'cloudwatch' "$FAKE_ALARM_CALLS")" -eq 0 ]
+}
+
+@test "I6: the real GPU shutdown entry still stops the instance when disabling the alarms fails, with one warning naming the reason" {
+  mkdir -p "$TMP/bin"
+  cat > "$TMP/bin/aws" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FAKE_ALARM_CALLS:-/dev/null}"
+case "$*" in
+  *"ec2 describe-instances"*) echo i-0123456789abcdef0 ;;
+  *"cloudwatch disable-alarm-actions"*) echo "AccessDeniedException: explicit deny" >&2; exit 1 ;;
+esac
+exit 0
+SH
+  chmod +x "$TMP/bin/aws"
+  PATH="$TMP/bin:$PATH" run shutdown.d/10-gpu-box.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"could not disable"*"AccessDeniedException"* ]] || return 1
+  [[ "$output" == *"stopped i-0123456789abcdef0"* ]] || return 1
+}
+
 @test "startup.sh --no-gpu never calls gpu.sh; the default does" {
   export FAKE_STATE="$TMP/state" AWS_CALLS="$TMP/aws-calls" FAKE_ACCOUNT=111111111; mkdir -p "$FAKE_STATE"
   mkdir -p "$TMP/bin" "$TMP/kit/scripts/lib"

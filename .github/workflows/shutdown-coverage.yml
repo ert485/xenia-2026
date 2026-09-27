@@ -34,7 +34,10 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # A team PR could add its own executable scripts/ci/shutdown-coverage.sh; select the
+          # kit's own checkout by repository identity, not by whether that file happens to exist.
+          IS_KIT_REPO: ${{ github.repository == 'ert485/xenia-2026' }}
         run: |
           printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.txt"
-          if [ -x scripts/ci/shutdown-coverage.sh ] && [ -x scripts/shutdown.sh ]; then kit=.; else kit=.kit; fi
+          if [ "$IS_KIT_REPO" = "true" ]; then kit=.; else kit=.kit; fi
           "$kit/scripts/ci/shutdown-coverage.sh" "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/body.txt"

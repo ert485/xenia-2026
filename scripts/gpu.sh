@@ -112,6 +112,18 @@ else
 fi
 aws_() { aws --profile "$profile" --region "$region" "$@"; }
 
+# gpu_alarm_actions <enable|disable> <profile>: the metrics-missing alarm fires on a stopped box, so stop
+# silences both GPU alarms and start re-arms them. Never fatal: the alarms are Should tier. M7 of
+# the final review: show the real reason (a permissions error looks nothing like "not applied
+# yet"), still non-fatal.
+gpu_alarm_actions() {
+  local reason
+  if ! reason="$(aws cloudwatch "$1-alarm-actions" --region us-east-1 --profile "$2" \
+      --alarm-names xenia-gpu-box-unhealthy xenia-gpu-box-metrics-missing 2>&1)"; then
+    log "could not $1 the GPU alarms: $reason"
+  fi
+}
+
 instance() {
   aws_ ec2 describe-instances \
     --filters Name=tag:xenia-role,Values=gpu-box Name=instance-state-name,Values=pending,running,stopping,stopped \
@@ -132,16 +144,35 @@ run_on_box() {
   [[ "$st" == "Success" ]] || die "command on the GPU box ended with status $st"
 }
 
+# wait_ssm_online: poll SSM until the GPU box reports PingStatus Online, bounded at five minutes
+# (same pattern scripts/startup.sh uses for the Docker box, around its lines 35-41). EC2 reporting
+# the instance "running" doesn't mean the SSM agent has registered yet; sending a command before it
+# does raced the agent and failed outright (M11 of the final review).
+wait_ssm_online() {
+  local ping
+  for _ in $(seq 1 60); do
+    # A transient SSM API hiccup while polling just means "not online yet"; the bounded loop
+    # below is what fails the wait if it never comes online.
+    ping="$(aws_ ssm describe-instance-information --filters "Key=InstanceIds,Values=$id" \
+      --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)"  # ok-to-hide: see above
+    [[ "$ping" == "Online" ]] && return 0
+    sleep 5
+  done
+  die "the GPU box is running but not online in SSM after five minutes"
+}
+
 # wait_for_vllm_health: polls https://localhost:8443/health on the GPU box itself, bounded at 20
 # minutes (first boot downloads weights; a warm reboot is healthy in well under a minute). Returns
 # non-zero on timeout instead of dying: the caller updates the gateway either way (start.sh's own
 # probe, Task 7-follow-up-a, is what actually decides real-api-base vs. placeholder).
 wait_for_vllm_health() {
   local cid st i
+  wait_ssm_online
   # shellcheck disable=SC2016  # this is the remote command's source, not something to expand here
   cid="$(aws_ ssm send-command --instance-ids "$id" --document-name AWS-RunShellScript \
     --parameters '{"commands":["for i in $(seq 1 240); do curl -fsk -m 3 -o /dev/null https://localhost:8443/health && { echo healthy; exit 0; }; sleep 5; done; echo timeout; exit 1"]}' \
     --query Command.CommandId --output text)"
+  [[ -n "$cid" && "$cid" != "None" ]] || die "send-command for the vLLM health wait returned no command id"
   for ((i = 0; i < 450; i++)); do
     st="$(aws_ ssm get-command-invocation --command-id "$cid" --instance-id "$id" --query Status --output text 2>/dev/null || echo Pending)"
     case "$st" in Pending|InProgress|Delayed) sleep 3 ;; *) break ;; esac
@@ -158,6 +189,7 @@ case "$action" in
   start)
     aws_ ec2 start-instances --instance-ids "$id" >/dev/null
     aws_ ec2 wait instance-running --instance-ids "$id"
+    gpu_alarm_actions enable "$profile"
     log "GPU box running; waiting for vLLM to report healthy (up to 20 minutes on a first boot that has to download weights; a warm reboot is much faster)"
     if wait_for_vllm_health; then
       log "vLLM healthy"
@@ -168,6 +200,7 @@ case "$action" in
     "$KIT_ROOT/scripts/box.sh" xenia-gateway Action=update
     ;;
   stop)
+    gpu_alarm_actions disable "$profile"
     aws_ ec2 stop-instances --instance-ids "$id" >/dev/null
     log "GPU box stopping; updating the gateway now so it fails over to Bedrock immediately instead of waiting on a future request to notice"
     "$KIT_ROOT/scripts/box.sh" xenia-gateway Action=update
