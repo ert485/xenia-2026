@@ -211,10 +211,18 @@ note_result_write_failed() {
 # `if ! write_result ...; then note_result_write_failed ...; fi`: under `set -e`, an unguarded call
 # that returns 1 here would otherwise kill the whole `once` pass, or end the `watch` daemon for
 # good — one planted symlink would let the agent switch off its own broker.
+#
+# M8: the -L/-e check above and the write itself are two separate syscalls, not one atomic open --
+# a symlink planted in that tiny window would have been followed by a plain `> "$result_file"`
+# redirect, writing this content to wherever the symlink pointed. Builds the content in a temp file
+# in the same directory, then renames it into place, exactly like write_proof already does: a
+# rename replaces the destination's directory entry without ever dereferencing it, so even a
+# symlink planted in the window between the check and the rename is just overwritten, never
+# followed to its target.
 write_result() {
   local result_file="$1" title="$2" status="$3" reason="$4" command="$5"
   local exit_code="$6" output="$7" proof_path="$8"
-  local masked_command=""
+  local masked_command="" result_dir tmp_file
 
   if [ -L "$result_file" ]; then
     log "agent-requests: refusing to write $result_file: it already exists as a symlink"
@@ -227,6 +235,8 @@ write_result() {
 
   [ -n "$command" ] && masked_command="$(printf '%s' "$command" | mask_secrets)"
 
+  result_dir="$(dirname "$result_file")"
+  tmp_file="$(mktemp "$result_dir/.result.XXXXXX")" || return 1
   {
     printf '# Result: %s\n\n' "$title"
     printf -- '- Status: %s\n' "$status"
@@ -240,7 +250,8 @@ write_result() {
     if [ -n "$proof_path" ]; then
       printf '\nProof written: %s\n' "$proof_path"
     fi
-  } > "$result_file"
+  } > "$tmp_file"
+  mv -f -- "$tmp_file" "$result_file"
 }
 
 WORKSPACE_PHYSICAL=""

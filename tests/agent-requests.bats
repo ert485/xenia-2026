@@ -261,6 +261,19 @@ git_init_ws() {
   [[ "$output" == *'this request writes no proof'* ]]
 }
 
+@test "structural: write_result writes through a temp file and rename (M8), not a direct redirect" {
+  # A real TOCTOU race (a symlink planted between write_result's -L/-e check and the write) isn't
+  # practical to trigger deterministically in bats, so this asserts the shape of the fix instead,
+  # the same way the read-once structural test below does: write_result builds its content in a
+  # temp file inside the result file's own directory, then renames it into place -- a `mv` replaces
+  # the destination's directory entry without ever following it, unlike `> "$result_file"`, which
+  # writes through a symlink planted at that path to wherever it points.
+  grep -qF 'result_dir="$(dirname "$result_file")"' "$SCRIPT" || return 1
+  grep -qF 'tmp_file="$(mktemp "$result_dir/' "$SCRIPT" || return 1
+  [ "$(grep -c 'mv -f -- "\$tmp_file" "\$result_file"' "$SCRIPT")" -eq 1 ] || return 1
+  ! grep -qE '^\s*\}\s*>\s*"\$result_file"\s*$' "$SCRIPT"
+}
+
 @test "structural: the request is read once into memory; parsers work from text, not the path" {
   # A real TOCTOU race (the agent swapping the request file for a symlink mid-run) isn't
   # practical to trigger deterministically in bats, so this asserts the shape of the fix instead:
