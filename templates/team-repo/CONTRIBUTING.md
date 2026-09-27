@@ -71,6 +71,12 @@ yours). The kit builds it from your branch's compose file, so keep to the conven
 
 At most three previews run at once; the oldest is removed first. A preview disappears when its PR closes.
 
+## Deploys
+
+After a push to `main` deploys, the box needs `GET /` on `https://app.26.cohack.tetl.ca` to answer 2xx
+or 3xx within `HEALTH_TIMEOUT` (90 seconds by default) — otherwise it reverts to the image that was
+running before.
+
 ## Contracts
 
 When the product has an API, adopt the kit's `contracts/` starter at the 11:30 architecture checkpoint by

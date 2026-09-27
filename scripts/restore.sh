@@ -34,8 +34,20 @@ container="${2:-}"
 log "restore: $key into $container on the Docker box."
 log "This drops and recreates every database in the dump, recreates its roles, and disconnects the app"
 log "from them while it runs. The box first saves a pre-restore dump, so a second restore can undo it."
+# M14 of the final review: gateway-postgres-1 holds every teammate's virtual key. Restoring an
+# older dump brings back any key revoked or rotated since -- including one rotated because it
+# leaked -- so warn before the confirmation, and point at the fix after a successful restore.
+is_gateway_postgres=0
+[[ "$container" == gateway-postgres* ]] && is_gateway_postgres=1
+if [[ "$is_gateway_postgres" == 1 ]]; then
+  log "warning: this is the gateway's Postgres. Restoring an older dump brings back any virtual"
+  log "key revoked or rotated since the dump, including one rotated because it leaked."
+fi
 if [[ "${3:-}" != "--yes" ]]; then
   read -r -p "Type the container name to continue: " answer
   [[ "$answer" == "$container" ]] || die "not confirmed; nothing changed"
 fi
 "$KIT_ROOT/scripts/box.sh" xenia-restore "Key=$key" "Container=$container"
+if [[ "$is_gateway_postgres" == 1 ]]; then
+  log "run scripts/rotate-key.sh for any key revoked or rotated since this dump"
+fi

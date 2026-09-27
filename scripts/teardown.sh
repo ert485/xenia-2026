@@ -40,6 +40,22 @@ log "== recipes/docker-box: the gateway (its Postgres holds keys and spend histo
 log "   the hourly backups stay in the backup bucket"
 if ask "Destroy recipes/docker-box?"; then tf recipes/docker-box destroy; else log "kept recipes/docker-box"; fi
 
+log "== examples/dynamodb-demo: the Should-tier demo DynamoDB table (M13 of the final review)"
+# ok-to-hide: an uninitialized or never-applied stack has no state -- that's "nothing to destroy,"
+# not an error worth surfacing.
+demo_state="$(tf examples/dynamodb-demo state list 2>/dev/null || true)"
+if [[ -n "$demo_state" ]]; then
+  if ask "Destroy examples/dynamodb-demo?"; then
+    log "deletion protection is on by default: if this fails, set deletion_protection = false in"
+    log "infra/examples/dynamodb-demo/main.tf (or its module call), apply, then destroy again"
+    tf examples/dynamodb-demo destroy
+  else
+    log "kept examples/dynamodb-demo"
+  fi
+else
+  log "examples/dynamodb-demo: no state, nothing to destroy"
+fi
+
 if [[ "$all" == 1 ]]; then
   log "== platform: zone, certificate, OIDC roles, ECR, parameters"
   if ask "Destroy platform?"; then

@@ -116,7 +116,7 @@ PY
   [[ "$output" == *"preview refused"* ]] || return 1
   [[ "$output" == *"service web: privileged: true"* ]] || return 1
   [ -z "$(downs)" ]
-  ! grep -q ' up -d' "$CALLS"
+  ! grep -q ' up -d' "$CALLS" || return 1
   ! grep -q ' build' "$CALLS"
 }
 

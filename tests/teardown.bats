@@ -52,3 +52,41 @@ setup() {
   grep -qx 'tf.sh platform destroy' "$CALLS"
   [ "$(grep -c 'tf.sh org destroy' "$CALLS")" -eq 0 ]
 }
+
+@test "M13: examples/dynamodb-demo with no state is never offered (no extra prompt, no destroy)" {
+  run bash -c 'printf "no\nno\nno\n" | "$KIT_ROOT/scripts/teardown.sh"'
+  [ "$status" -eq 0 ]
+  grep -q 'tf.sh examples/dynamodb-demo state list' "$CALLS" || return 1
+  [ "$(grep -c 'tf.sh examples/dynamodb-demo destroy' "$CALLS")" -eq 0 ]
+}
+
+@test "M13: examples/dynamodb-demo with state is offered, and declining it destroys nothing" {
+  cat > "$TMP/kit/scripts/tf.sh" <<'SH'
+#!/usr/bin/env bash
+echo "tf.sh $*" >> "$CALLS"
+case "$*" in
+  *"output -raw bucket"*) echo xenia-site-kit-abc123 ;;
+  *"examples/dynamodb-demo state list"*) echo "module.demo.aws_dynamodb_table.this" ;;
+esac
+SH
+  chmod +x "$TMP/kit/scripts/tf.sh"
+  run bash -c 'printf "no\nno\nno\nno\n" | "$KIT_ROOT/scripts/teardown.sh"'
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'tf.sh examples/dynamodb-demo destroy' "$CALLS")" -eq 0 ]
+}
+
+@test "M13: yes to examples/dynamodb-demo (when it has state) destroys it and mentions turning off deletion protection first" {
+  cat > "$TMP/kit/scripts/tf.sh" <<'SH'
+#!/usr/bin/env bash
+echo "tf.sh $*" >> "$CALLS"
+case "$*" in
+  *"output -raw bucket"*) echo xenia-site-kit-abc123 ;;
+  *"examples/dynamodb-demo state list"*) echo "module.demo.aws_dynamodb_table.this" ;;
+esac
+SH
+  chmod +x "$TMP/kit/scripts/tf.sh"
+  run bash -c 'printf "no\nno\nno\nyes\n" | "$KIT_ROOT/scripts/teardown.sh"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deletion protection"* ]] || return 1
+  grep -qx 'tf.sh examples/dynamodb-demo destroy' "$CALLS"
+}

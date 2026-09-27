@@ -71,3 +71,42 @@ SH
   [[ "$output" == *"psql exited 2"* ]] || return 1
   [[ "$output" != *"restored host/app-db-1"* ]]
 }
+
+# --- scripts/restore.sh (laptop): M14 of the final review. Restoring an older gateway dump brings
+# back any virtual keys revoked or rotated since -- warn before the confirmation, and suggest
+# scripts/rotate-key.sh after a successful restore.
+
+@test "M14: restoring the gateway's Postgres warns about revoked keys before the confirmation, and suggests rotate-key after" {
+  KIT_ROOT="$BATS_TEST_TMPDIR/kit"; mkdir -p "$KIT_ROOT/scripts/lib"
+  cp "$BATS_TEST_DIRNAME/../scripts/restore.sh" "$KIT_ROOT/scripts/"
+  cp "$BATS_TEST_DIRNAME/../scripts/lib/common.sh" "$KIT_ROOT/scripts/lib/"
+  cat > "$KIT_ROOT/scripts/box.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'box.sh %s\n' "$*" >> "$CALLS"
+exit 0
+SH
+  chmod +x "$KIT_ROOT/scripts/restore.sh" "$KIT_ROOT/scripts/box.sh"
+  export KIT_ROOT
+  run "$KIT_ROOT/scripts/restore.sh" "host/gateway-postgres-1/20260925T030000Z.sql.gz" gateway-postgres-1 --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"revoked"* ]] || return 1
+  [[ "$output" == *"rotated"* ]] || return 1
+  [[ "$output" == *"scripts/rotate-key.sh"* ]] || return 1
+  grep -qx 'box.sh xenia-restore Key=host/gateway-postgres-1/20260925T030000Z.sql.gz Container=gateway-postgres-1' "$CALLS"
+}
+
+@test "M14: restoring a non-gateway container prints no revoked-key warning or rotate-key follow-up" {
+  KIT_ROOT="$BATS_TEST_TMPDIR/kit2"; mkdir -p "$KIT_ROOT/scripts/lib"
+  cp "$BATS_TEST_DIRNAME/../scripts/restore.sh" "$KIT_ROOT/scripts/"
+  cp "$BATS_TEST_DIRNAME/../scripts/lib/common.sh" "$KIT_ROOT/scripts/lib/"
+  cat > "$KIT_ROOT/scripts/box.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'box.sh %s\n' "$*" >> "$CALLS"
+exit 0
+SH
+  chmod +x "$KIT_ROOT/scripts/restore.sh" "$KIT_ROOT/scripts/box.sh"
+  export KIT_ROOT
+  run "$KIT_ROOT/scripts/restore.sh" "host/app-db-1/20260925T030000Z.sql.gz" app-db-1 --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"scripts/rotate-key.sh"* ]]
+}
