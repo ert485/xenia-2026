@@ -136,7 +136,7 @@ jobs:
               echo '<!-- xenia-pr-review -->'
               echo "<!-- xenia-pr-review-sha:$HEAD_SHA -->"
               # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
-              echo 'Bot review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
+              echo 'Bot review (advisory; only the required checks (check, verify, shutdown-coverage) block).'
               if [ "$MODE" = consistency ]; then echo 'Mode: consistency (this PR changes the team rules).'; fi
               echo
               echo "$msg"
@@ -160,7 +160,7 @@ jobs:
             echo '<!-- xenia-pr-review -->'
             echo "<!-- xenia-pr-review-sha:$HEAD_SHA -->"
             # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
-            echo 'Bot review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
+            echo 'Bot review (advisory; only the required checks (check, verify, shutdown-coverage) block).'
             if [ "$MODE" = consistency ]; then echo 'Mode: consistency (this PR changes the team rules).'; fi
             echo
             jq -r '.result' review.json | head -c 60000
@@ -342,7 +342,7 @@ jobs:
               echo '<!-- xenia-deep-review -->'
               echo "<!-- xenia-deep-review-sha:$HEAD_SHA -->"
               # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
-              echo 'Bot deep review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
+              echo 'Bot deep review (advisory; only the required checks (check, verify, shutdown-coverage) block).'
               echo
               echo "$msg"
             } > deep-review.md
@@ -365,7 +365,7 @@ jobs:
             echo '<!-- xenia-deep-review -->'
             echo "<!-- xenia-deep-review-sha:$HEAD_SHA -->"
             # shellcheck disable=SC2016  # backticks here are literal markdown for make check, not command substitution
-            echo 'Bot deep review (advisory; only `make check` and shutdown coverage block, P-two-gates).'
+            echo 'Bot deep review (advisory; only the required checks (check, verify, shutdown-coverage) block).'
             echo
             jq -r '.result' review.json | head -c 60000
           # the sk-... pattern below redacts gateway keys on the assumption that they're LiteLLM

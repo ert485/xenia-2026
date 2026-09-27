@@ -30,15 +30,16 @@ deny() {
 # jq missing: fail closed only for what can still be told apart without it (a raw grep on the
 # payload text), per the plugin's hook contract. Everything else is allowed rather than guessed at.
 if ! command -v jq >/dev/null 2>&1; then
+  # ok-to-hide: jq-absent probe of the raw payload; a grep error just means not ours
   if grep -q '"tool_name"[[:space:]]*:[[:space:]]*"Bash"' <<<"$payload" 2>/dev/null \
-     || grep -q '"tool_name"[[:space:]]*:[[:space:]]*"Write"' <<<"$payload" 2>/dev/null; then
+     || grep -q '"tool_name"[[:space:]]*:[[:space:]]*"Write"' <<<"$payload" 2>/dev/null; then  # ok-to-hide: jq-absent probe of the raw payload; a grep error just means not ours
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"deny-ruinous: jq missing, cannot inspect the call"}}\n'
   fi
   exit 0
 fi
 
-tool_name="$(jq -r '.tool_name // empty' <<<"$payload" 2>/dev/null)" || tool_name=""
-cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)" || cwd=""
+tool_name="$(jq -r '.tool_name // empty' <<<"$payload" 2>/dev/null)" || tool_name=""  # ok-to-hide: a malformed payload is not ours to judge; the hook allows it (tested)
+cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)" || cwd=""  # ok-to-hide: a malformed payload is not ours to judge; the hook allows it (tested)
 
 # ---------------------------------------------------------------------------
 # Shell tokenizer: python3's shlex, posix mode, with an unquoted newline treated as its own
@@ -64,7 +65,7 @@ tokenize_bash_command() {
   command -v python3 >/dev/null 2>&1 || return 2
   local tmp rc tok
   tmp="$(mktemp)" || return 2
-  python3 -c "$TOKENIZE_PY" "$1" > "$tmp" 2>/dev/null
+  python3 -c "$TOKENIZE_PY" "$1" > "$tmp" 2>/dev/null  # ok-to-hide: the exit status is checked below; only the message is dropped
   rc=$?
   if [ "$rc" -ne 0 ]; then rm -f "$tmp"; return 1; fi
   while IFS= read -r -d '' tok; do
@@ -183,7 +184,7 @@ is_dangerous_rm_target() {
   esac
   if [[ -n "$cwd" ]]; then
     [[ "$target" == "$cwd" ]] && return 0
-    worktree="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
+    worktree="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"  # ok-to-hide: a cwd outside a repository has no worktree; handled as empty below
     [[ -n "$worktree" && "$target" == "$worktree" ]] && return 0
   fi
   return 1
@@ -627,17 +628,17 @@ check_write_path() {
 
 case "$tool_name" in
   Bash)
-    command_str="$(jq -r '.tool_input.command // empty' <<<"$payload" 2>/dev/null)" || command_str=""
+    command_str="$(jq -r '.tool_input.command // empty' <<<"$payload" 2>/dev/null)" || command_str=""  # ok-to-hide: a malformed payload is not ours to judge; the hook allows it (tested)
     [[ -n "$command_str" ]] || exit 0
     check_bash "$command_str" "$cwd"
     ;;
   Write|Edit|MultiEdit)
-    file_path="$(jq -r '.tool_input.file_path // empty' <<<"$payload" 2>/dev/null)" || file_path=""
+    file_path="$(jq -r '.tool_input.file_path // empty' <<<"$payload" 2>/dev/null)" || file_path=""  # ok-to-hide: a malformed payload is not ours to judge; the hook allows it (tested)
     [[ -n "$file_path" ]] || exit 0
     check_write_path "$file_path"
     ;;
   NotebookEdit)
-    notebook_path="$(jq -r '.tool_input.notebook_path // empty' <<<"$payload" 2>/dev/null)" || notebook_path=""
+    notebook_path="$(jq -r '.tool_input.notebook_path // empty' <<<"$payload" 2>/dev/null)" || notebook_path=""  # ok-to-hide: a malformed payload is not ours to judge; the hook allows it (tested)
     [[ -n "$notebook_path" ]] || exit 0
     check_write_path "$notebook_path"
     ;;

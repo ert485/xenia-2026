@@ -18,7 +18,8 @@ env_file="${XENIA_ENV_FILE:-/etc/xenia.env}"
 key="${1:?usage: restore.sh <s3-key> <container>}"
 c="${2:?usage: restore.sh <s3-key> <container>}"
 [[ "$key" =~ ^[A-Za-z0-9._/-]+\.sql\.gz$ && "$key" != *..* ]] || die "not a backup key: $key"
-image="$(docker inspect -f '{{.Config.Image}}' "$c" 2>/dev/null)" || die "no such container: $c"
+# docker's own message tells "no such object" apart from a broken daemon; show it rather than guess.
+image="$(docker inspect -f '{{.Config.Image}}' "$c" 2>&1)" || die "no such container, or docker failed: $c: $image"
 [[ "$image" == postgres* ]] || die "$c runs $image, not postgres"
 user="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" | sed -n 's/^POSTGRES_USER=//p' | head -1)"
 user="${user:-postgres}"
@@ -34,7 +35,7 @@ aws s3 cp "s3://$BACKUP_BUCKET/$key" "$work/dump.sql.gz" --only-show-errors
 gunzip "$work/dump.sql.gz"
 dbs=()
 while IFS= read -r db; do dbs+=("$db"); done < <(
-  sed -nE 's/^CREATE DATABASE "?([A-Za-z0-9_]+)"?( .*)?;$/\1/p' "$work/dump.sql" | grep -vxE 'postgres|template0|template1' || true)
+  sed -nE 's/^CREATE DATABASE "?([A-Za-z0-9_]+)"?( .*)?;$/\1/p' "$work/dump.sql" | grep -vxE 'postgres|template0|template1' || true)  # ok-to-hide: no match means the dump has no extra databases
 for db in "${dbs[@]}"; do
   log "dropping database $db"
   docker exec "$c" psql -q -U "$user" -d postgres -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE);"
@@ -52,7 +53,7 @@ if [[ "$psql_rc" -ge 2 ]]; then
   tail -20 "$work/psql.log" >&2
   die "psql exited $psql_rc (connection or fatal error); the pre-restore state is $pre"
 fi
-unexpected="$(grep 'ERROR' "$work/psql.log" | grep -v 'already exists' || true)"
+unexpected="$(grep 'ERROR' "$work/psql.log" | grep -v 'already exists' || true)"  # ok-to-hide: no match means no unexpected error; checked just below
 if [[ -n "$unexpected" ]]; then
   printf '%s\n' "$unexpected" | head -20 >&2
   die "the replay reported errors; the pre-restore state is $pre"

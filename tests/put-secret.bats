@@ -17,8 +17,8 @@ setup() {
 @test "put-secret.sh refuses app/stripe-key (deploy.sh would export it as an env var and can't)" {
   run bash -c 'printf "%s" "SECRET-VALUE-123" | scripts/put-secret.sh app/stripe-key'
   [ "$status" -eq 1 ]
-  [[ "$output" == *"deploy.sh"* ]]
-  [[ "$output" != *"SECRET-VALUE-123"* ]]
+  [[ "$output" == *"deploy.sh"* ]] || return 1
+  [[ "$output" != *"SECRET-VALUE-123"* ]] || return 1
   run grep -q 'put-parameter' "$AWS_CALLS"
   [ "$status" -ne 0 ]
 }
@@ -33,7 +33,7 @@ setup() {
 @test "put-secret.sh refuses a reserved app/<NAME> even though it is shell-identifier-shaped" {
   run bash -c 'printf "%s" "/fake/evil/bin" | scripts/put-secret.sh app/PATH'
   [ "$status" -eq 1 ]
-  [[ "$output" == *"deploy.sh"* ]]
+  [[ "$output" == *"deploy.sh"* ]] || return 1
   run bash -c 'printf "%s" "http://fake.example.invalid" | scripts/put-secret.sh app/HEALTH_URL'
   [ "$status" -eq 1 ]
   [[ "$output" == *"deploy.sh"* ]]

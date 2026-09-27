@@ -151,10 +151,10 @@ run_on_box() {
 wait_ssm_online() {
   local ping
   for _ in $(seq 1 60); do
-    # ok-to-hide: a transient SSM API hiccup while polling just means "not online yet"; the
-    # bounded loop below is what fails the wait if it never comes online.
+    # A transient SSM API hiccup while polling just means "not online yet"; the bounded loop
+    # below is what fails the wait if it never comes online.
     ping="$(aws_ ssm describe-instance-information --filters "Key=InstanceIds,Values=$id" \
-      --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)"
+      --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)"  # ok-to-hide: see above
     [[ "$ping" == "Online" ]] && return 0
     sleep 5
   done

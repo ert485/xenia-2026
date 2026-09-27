@@ -173,7 +173,7 @@ print_request() {
   case "$command" in
     *git*)
       local remotes
-      remotes="$(git -C "$workspace" remote -v 2>/dev/null)"
+      remotes="$(git -C "$workspace" remote -v 2>/dev/null)"  # ok-to-hide: display only; empty output prints (none configured)
       if [ -n "$remotes" ]; then
         printf 'Remote URLs (this workspace, not a clone):\n%s\n\n' "$(sanitize_for_display "$remotes")"
       else
@@ -370,7 +370,7 @@ is_allowed_git_config_key() {
 # makes sense relative to the worktree's own ".git" file.
 resolve_git_hooks_dir() {
   local workspace="$1" common_dir
-  common_dir="$(git -C "$workspace" rev-parse --git-common-dir 2>/dev/null)" || return 1
+  common_dir="$(git -C "$workspace" rev-parse --git-common-dir 2>/dev/null)" || return 1  # ok-to-hide: a workspace outside a repository has no hooks directory to check
   case "$common_dir" in
     /*) : ;;
     *) common_dir="$workspace/$common_dir" ;;
@@ -421,7 +421,7 @@ workspace_has_disallowed_git_config() {
     is_allowed_git_config_key "$key" && continue
     DISALLOWED_GIT_CONFIG_KEY="$key"
     return 0
-  done < <(git -C "$workspace" config --list --show-scope 2>/dev/null)
+  done < <(git -C "$workspace" config --list --show-scope 2>/dev/null)  # ok-to-hide: best-effort probe; the human y or N prompt stays the backstop
   return 1
 }
 

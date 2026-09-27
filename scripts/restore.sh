@@ -20,7 +20,7 @@ case "${1:-}" in
   --list)
     b="$(bucket)"
     aws s3 ls "s3://$b/" --recursive --profile cohack --region ca-central-1 \
-      | { if [[ -n "${2:-}" ]]; then grep -F "/$2/" || true; else cat; fi; } \
+      | { if [[ -n "${2:-}" ]]; then grep -F "/$2/" || [[ $? -eq 1 ]]; else cat; fi; } \
       | sort | tail -n 20 | awk '{print $1, $2, $4}' | mask
     exit 0 ;;
 esac
