@@ -22,9 +22,11 @@ body_lines() {
 }
 
 changed="$(git diff --name-only "$base...$head")"
+# ok-to-hide: grep's zero-match exit code; an empty $billable is the normal "nothing billable" case.
 billable="$(printf '%s\n' "$changed" | grep -E '^infra/|^\.github/workflows/deploy|(^|/)(docker-)?compose[^/]*\.ya?ml$' || true)"
 
 # The PR template ships "Shutdown: none needed because <reason>"; an unedited placeholder is no reason.
+# ok-to-hide: grep's zero-match exit code; an empty $line is the normal "no Shutdown: line yet" case.
 line="$(body_lines | grep -E '^Shutdown:[[:space:]]*none needed because[[:space:]]+[^[:space:]].*$' | head -1 || true)"
 reason="$(printf '%s' "$line" | sed -E 's/^Shutdown:[[:space:]]*none needed because[[:space:]]+//; s/[[:space:]]+$//')"
 placeholder='^<.*>$'
@@ -46,6 +48,7 @@ else
   status=1
 fi
 
+# ok-to-hide: a missing shutdown.d/ finds nothing; an empty $entries is handled by the check below.
 entries="$(find shutdown.d -maxdepth 1 -type f -name '*.sh' 2>/dev/null | LC_ALL=C sort || true)"
 if [[ -n "$entries" ]]; then
   while read -r f; do bash -n "$f" || status=1; done <<< "$entries"

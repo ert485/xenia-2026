@@ -102,6 +102,27 @@ EOF
   [ "$status" -eq 1 ]
 }
 
+# preview.sh
+
+@test "preview.sh explains when the branch has no open PR" {
+  printf '#!/usr/bin/env bash\necho "no pull requests found for branch \\"x\\"" >&2\nexit 1\n' > "$TMP/gh"
+  chmod +x "$TMP/gh"
+  run plugin/scripts/preview.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"this branch has no open PR"* ]] || return 1
+  [[ "$output" != *"gh failed"* ]]
+}
+
+@test "preview.sh distinguishes a gh auth failure from no open PR" {
+  printf '#!/usr/bin/env bash\necho "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2\nexit 1\n' > "$TMP/gh"
+  chmod +x "$TMP/gh"
+  run plugin/scripts/preview.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gh failed"* ]] || return 1
+  [[ "$output" == *"401"* ]] || return 1
+  [[ "$output" != *"no open PR"* ]]
+}
+
 # rule-feedback-line.sh
 
 @test "rule-feedback-line normalizes a slug with a reason" {

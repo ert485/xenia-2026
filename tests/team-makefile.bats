@@ -9,7 +9,14 @@ setup() {
     printf '#!/usr/bin/env bash\necho "%s $*" >> "%s"\n[ -z "${FAIL_ON:-}" ] || [ "%s" != "$FAIL_ON" ]\n' "$c" "$CALLS" "$c" > "$BATS_TEST_TMPDIR/bin/$c"
     chmod +x "$BATS_TEST_TMPDIR/bin/$c"
   done
-  printf '#!/usr/bin/env bash\necho "gh $*" >> "%s"\n[ -n "${FAKE_PR:-}" ] && echo "$FAKE_PR"\nexit 0\n' "$CALLS" > "$BATS_TEST_TMPDIR/bin/gh"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "echo \"gh \$*\" >> \"$CALLS\"" \
+    'if [ -n "${FAKE_GH_FAIL:-}" ]; then echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2; exit 1; fi' \
+    'if [ -n "${FAKE_PR:-}" ]; then echo "$FAKE_PR"; exit 0; fi' \
+    'echo "no pull requests found for branch \"x\"" >&2' \
+    'exit 1' \
+    > "$BATS_TEST_TMPDIR/bin/gh"
   chmod +x "$BATS_TEST_TMPDIR/bin/gh"
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
   cp "$BATS_TEST_DIRNAME/../templates/contracts/openapi.yaml" "$PROJ/contracts/openapi.yaml"
@@ -89,5 +96,14 @@ setup() {
 @test "preview-url explains when the branch has no PR" {
   run make -s -C "$PROJ" -f "$MK" preview-url
   [ "$status" -ne 0 ]
-  [[ "$output" == *"no open PR"* ]]
+  [[ "$output" == *"no open PR"* ]] || return 1
+  [[ "$output" != *"401"* ]]
+}
+
+@test "preview-url distinguishes a gh auth failure from no open PR" {
+  FAKE_GH_FAIL=1 run make -s -C "$PROJ" -f "$MK" preview-url
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gh failed"* ]] || return 1
+  [[ "$output" == *"401"* ]] || return 1
+  [[ "$output" != *"no open PR"* ]]
 }

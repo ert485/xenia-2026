@@ -35,6 +35,7 @@ prev_sha="$sha"
 if [[ "$previous" =~ :sha-([0-9a-f]{40})$ ]]; then prev_sha="${BASH_REMATCH[1]}"; fi
 
 if [[ -z "$app_dir" ]]; then
+  # ok-to-hide: optional repo-variable lookup; an unset APP_DIR falls back to "." on the next line.
   app_dir="$(gh variable get APP_DIR --repo "$repo" 2>/dev/null || true)"
   app_dir="${app_dir:-.}"
 fi

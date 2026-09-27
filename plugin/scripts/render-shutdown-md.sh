@@ -8,6 +8,7 @@
 # Exits 1 naming the file and the field when a header is incomplete. Runs in CI: no env file needed.
 set -euo pipefail
 if [[ $# -eq 0 ]]; then
+  # ok-to-hide: probe for a git repo; falls back to the cwd, matching shutdown-entry.sh's convention.
   root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
   set -- "$root/shutdown.d"
   if [[ -n "${TEAM_REPO_DIR:-}" && -d "$TEAM_REPO_DIR/shutdown.d" ]]; then set -- "$@" "$TEAM_REPO_DIR/shutdown.d"; fi

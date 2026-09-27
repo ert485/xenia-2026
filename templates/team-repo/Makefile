@@ -33,6 +33,12 @@ dev:
 
 # make preview-url prints this branch's preview address (preview-up.yml builds it on every push to the PR).
 preview-url:
-	@n="$$(gh pr view --json number --jq .number 2>/dev/null)"; \
-	if [ -z "$$n" ]; then echo "preview-url: no open PR for this branch; push it and open a PR first"; exit 1; fi; \
-	echo "https://pr-$$n.$(PREVIEW_DOMAIN)"
+	@out="$$(gh pr view --json number --jq .number 2>&1)"; rc=$$?; \
+	if [ $$rc -ne 0 ]; then \
+	  case "$$out" in \
+	    *"no pull requests found"*) echo "preview-url: no open PR for this branch; push it and open a PR first" ;; \
+	    *) echo "preview-url: gh failed: $$out" >&2 ;; \
+	  esac; \
+	  exit 1; \
+	fi; \
+	echo "https://pr-$$out.$(PREVIEW_DOMAIN)"

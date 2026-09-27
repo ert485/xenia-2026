@@ -86,6 +86,7 @@ EOF
 }
 
 step() { printf '\n== step %s: %s\n' "$1" "$2"; }
+# ok-to-hide: existence check; an API error or an empty result both mean "no main ruleset yet".
 ruleset_exists() { gh api "repos/$repo/rulesets" --jq '.[] | select(.name == "main") | .id' 2>/dev/null | grep -q .; }
 
 step 1 "the repo exists; its OIDC subject claim names the workflow file"
@@ -114,7 +115,7 @@ step 3 "copy the kit into the team repo"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 dest="$work/repo"
-gh repo clone "$repo" "$dest" -- -q 2>/dev/null
+gh repo clone "$repo" "$dest" -- -q
 cd "$dest"
 if git rev-parse -q --verify HEAD >/dev/null; then
   default="$(gh repo view "$repo" --json defaultBranchRef --jq .defaultBranchRef.name)"
@@ -152,6 +153,7 @@ cp "$KIT_ROOT/shutdown.d/README.md" shutdown.d/README.md
 touch shutdown.d/.gitkeep
 "$KIT_ROOT/scripts/render-shutdown-md.sh" shutdown.d > SHUTDOWN.md
 for line in '*.local.env' '.venv/' 'node_modules/' '.kit/' '.agent/' '.agent-requests/'; do
+  # ok-to-hide: idempotent add; grep fails when the line is absent, or .gitignore doesn't exist yet.
   grep -qxF -- "$line" .gitignore 2>/dev/null || printf '%s\n' "$line" >> .gitignore
 done
 git add -A
