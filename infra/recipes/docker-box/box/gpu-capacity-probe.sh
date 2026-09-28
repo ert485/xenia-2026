@@ -15,7 +15,19 @@
 # applies only to containers) — instead it calls `aws logs put-log-events` directly against the same
 # log group, reusing the box role's existing ContainerLogs grant (iam.tf) rather than needing a
 # CloudWatch agent. scripts/gpu.sh capacity-log reads it back.
+#
+# DISABLED by default since 2026-09-28: over the 2026-09-26 weekend the team account was billed 10.1
+# hours ($18.74) of UnusedBox:g6e.xlarge, the charge for a capacity reservation that exists with no
+# instance in it. This probe is the only thing in the account that creates reservations, so its
+# create-then-cancel is not reliably side-effect-free: a reservation can stay open for hours, billed
+# at the full g6e hourly rate. Until that is fixed (for example, a sweep that proves every probe
+# reservation is gone before the run exits, and an alarm on UnusedBox), the timer still fires every
+# 10 minutes but the script exits at once with a warning. XENIA_CAPACITY_PROBE_ENABLED=1 runs it anyway.
 set -euo pipefail
+if [[ "${XENIA_CAPACITY_PROBE_ENABLED:-0}" != "1" ]]; then
+  echo "WARNING: the GPU capacity probe is disabled: its create-then-cancel reservations currently have a risk of staying open, and an open reservation bills at the full g6e hourly rate (10.1 hours, \$18.74, over the 2026-09-26 weekend). Set XENIA_CAPACITY_PROBE_ENABLED=1 to run it anyway." >&2
+  exit 0
+fi
 here="$(cd "$(dirname "$0")" && pwd)"
 source "$here/lib.sh"
 load_box_env

@@ -7,6 +7,9 @@ setup() {
   export SCRIPT="$BATS_TEST_DIRNAME/../infra/recipes/docker-box/box/gpu-capacity-probe.sh"
   export AWS_CALLS="$TMP/aws-calls"; : > "$AWS_CALLS"
   export XENIA_ENV_FILE="$TMP/xenia.env"
+  # The probe is disabled by default (its reservations can stay open); these tests exercise the
+  # probe itself, so they opt in. The "disabled by default" test below unsets it.
+  export XENIA_CAPACITY_PROBE_ENABLED=1
   printf 'ZONE=fake\nAPP_PORT=3000\nBACKUP_BUCKET=fake\nKIT_REPO=ert485/xenia-2026\nKIT_REF=main\n' > "$XENIA_ENV_FILE"
   cat > "$TMP/aws" <<'EOF'
 #!/usr/bin/env bash
@@ -40,6 +43,15 @@ exit 0
 EOF
   chmod +x "$TMP/aws"
   export PATH="$TMP:$PATH"
+}
+
+@test "disabled by default: warns that reservations can stay open, exits 0, makes no AWS call" {
+  unset XENIA_CAPACITY_PROBE_ENABLED
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARNING: the GPU capacity probe is disabled"* ]]
+  [[ "$output" == *"risk of staying open"* ]]
+  [ ! -s "$AWS_CALLS" ]
 }
 
 @test "capacity available: creates and cancels a reservation per type/zone, exits 0" {
